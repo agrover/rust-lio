@@ -1,0 +1,9 @@
+[package]
+
+name = "rust-lio"
+version = "0.0.1"
+authors = ["Andy Grover <agrover@redhat.com>"]
+
+[dependencies.uuid]
+
+git = "https://github.com/rust-lang/uuid.git"
