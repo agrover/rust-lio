@@ -591,13 +591,19 @@ pub fn get_storage_objects() -> Vec<Box<StorageObject + 'static>> {
 
     for path in paths.into_iter() {
         if path.is_dir() && path.filename_str().unwrap() != "alua" {
-            match get_type(&path) {
-                Some(Block) => { sos.push(box BlockStorageObject { path: path }) },
-                Some(Fileio) => { sos.push(box FileioStorageObject { path: path }) },
-                Some(Ramdisk) => { sos.push(box RamdiskStorageObject { path: path }) },
-                Some(ScsiPass) => { sos.push(box ScsiPassStorageObject { path: path }) },
-                Some(UserPass) => { sos.push(box UserPassStorageObject { path: path }) },
-                None => { },
+            let so_paths = fs::readdir(&Path::new(&path)).unwrap();
+
+            for so_path in so_paths.into_iter() {
+                if so_path.is_dir() {
+                    match get_type(&path) {
+                        Some(Block) => { sos.push(box BlockStorageObject { path: so_path }) },
+                        Some(Fileio) => { sos.push(box FileioStorageObject { path: so_path }) },
+                        Some(Ramdisk) => { sos.push(box RamdiskStorageObject { path: so_path }) },
+                        Some(ScsiPass) => { sos.push(box ScsiPassStorageObject { path: so_path }) },
+                        Some(UserPass) => { sos.push(box UserPassStorageObject { path: so_path }) },
+                        None => { },
+                    }
+                }
             }
         }
     }
