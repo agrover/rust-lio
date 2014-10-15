@@ -65,17 +65,13 @@ impl Fabric {
         let mut targets = Vec::new();
         let fab_paths = fs::readdir(&Path::new(&self.path)).unwrap();
 
-        for t_path in fab_paths.into_iter() {
-            if t_path.is_dir() && t_path.filename_str().unwrap() != "discovery_auth" {
-                let tpg_paths = fs::readdir(&Path::new(&t_path)).unwrap();
+        for t_path in fab_paths.into_iter()
+            .filter(|p| p.is_dir() && p.filename_str().unwrap() != "discovery_auth") {
+            let tpg_paths = fs::readdir(&Path::new(&t_path)).unwrap();
 
-                for tpg_path in tpg_paths.into_iter() {
-                    let tpg_dir_entry = tpg_path.filename_str().unwrap();
-
-                    if tpg_dir_entry.starts_with("tpgt_") {
-                        targets.push(Target { path: tpg_path.clone() });
-                    }
-                }
+            for tpg_path in tpg_paths.into_iter()
+                .filter(|p| p.filename_str().unwrap().starts_with("tpgt_")) {
+                targets.push(Target { path: tpg_path });
             }
         }
         targets
