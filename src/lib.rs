@@ -9,8 +9,8 @@ use std::vec::Vec;
 use std::os;
 use uuid::Uuid;
 
-static TARGET_PATH: &'static str = "/sys/kernel/config/target/";
-static HBA_PATH: &'static str = "/sys/kernel/config/target/core";
+const TARGET_PATH: &'static str = "/sys/kernel/config/target/";
+const HBA_PATH: &'static str = "/sys/kernel/config/target/core";
 
 pub fn get_fabrics() -> Vec<Fabric> {
     let paths = fs::readdir(&Path::new(TARGET_PATH)).unwrap();
@@ -39,13 +39,13 @@ impl Fabric {
 
     pub fn new(kind: FabricType) -> IoResult<Fabric> {
         let dirname = match kind {
-            ISCSI => "iscsi",
-            FCoE => "tcm_fc",
-            Qla2xxx => "qla2xxx",
-            SRP => "srpt",
-            Loopback => "loopback",
-            VHost => "vhost",
-            SBP2 => "sbp",
+            FabricType::ISCSI => "iscsi",
+            FabricType::FCoE => "tcm_fc",
+            FabricType::Qla2xxx => "qla2xxx",
+            FabricType::SRP => "srpt",
+            FabricType::Loopback => "loopback",
+            FabricType::VHost => "vhost",
+            FabricType::SBP2 => "sbp",
         };
 
         let path = Path::new(TARGET_PATH).join(dirname);
@@ -398,7 +398,7 @@ fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Path {
 
 impl BlockStorageObject {
     pub fn new(name: &str, backing_dev: &str) -> IoResult<BlockStorageObject> {
-        let path = get_free_hba_path(Block, name);
+        let path = get_free_hba_path(StorageObjectType::Block, name);
 
         try!(make_path(&path));
         try!(write_control(&path, "udev_path", backing_dev));
@@ -413,7 +413,7 @@ impl StorageObject for BlockStorageObject {
         self.path.clone()
     }
 
-    fn get_type(&self) -> StorageObjectType { Block }
+    fn get_type(&self) -> StorageObjectType { StorageObjectType::Block }
 }
 
 pub struct FileioStorageObject {
@@ -422,7 +422,7 @@ pub struct FileioStorageObject {
 
 impl FileioStorageObject {
     pub fn new(name: &str, backing_file: &str, write_back: bool) -> IoResult<FileioStorageObject> {
-        let path = get_free_hba_path(Fileio, name);
+        let path = get_free_hba_path(StorageObjectType::Fileio, name);
 
         try!(make_path(&path));
 
@@ -450,7 +450,7 @@ impl StorageObject for FileioStorageObject {
         self.path.clone()
     }
 
-    fn get_type(&self) -> StorageObjectType { Fileio }
+    fn get_type(&self) -> StorageObjectType { StorageObjectType::Fileio }
 }
 
 pub struct RamdiskStorageObject {
@@ -459,7 +459,7 @@ pub struct RamdiskStorageObject {
 
 impl RamdiskStorageObject {
     pub fn new(name: &str, size: u64) -> IoResult<RamdiskStorageObject> {
-        let path = get_free_hba_path(Ramdisk, name);
+        let path = get_free_hba_path(StorageObjectType::Ramdisk, name);
 
         try!(make_path(&path));
 
@@ -477,7 +477,7 @@ impl StorageObject for RamdiskStorageObject {
         self.path.clone()
     }
 
-    fn get_type(&self) -> StorageObjectType { Ramdisk }
+    fn get_type(&self) -> StorageObjectType { StorageObjectType::Ramdisk }
 }
 
 pub struct ScsiPassStorageObject {
@@ -499,7 +499,7 @@ fn get_hctl_for_dev(dev: &str) -> IoResult<(uint, uint, uint, uint)> {
 
 impl ScsiPassStorageObject {
     pub fn new(name: &str, backing_dev: &str) -> IoResult<ScsiPassStorageObject> {
-        let path = get_free_hba_path(ScsiPass, name);
+        let path = get_free_hba_path(StorageObjectType::ScsiPass, name);
 
         let (h, c, t, l) = try!(get_hctl_for_dev(backing_dev));
 
@@ -522,7 +522,7 @@ impl StorageObject for ScsiPassStorageObject {
         self.path.clone()
     }
 
-    fn get_type(&self) -> StorageObjectType { ScsiPass }
+    fn get_type(&self) -> StorageObjectType { StorageObjectType::ScsiPass }
 }
 
 pub struct UserPassStorageObject {
@@ -536,7 +536,7 @@ pub enum PassLevel {
 
 impl UserPassStorageObject {
     pub fn new(name: &str, size: u64, pass_level: PassLevel, config: &str) -> IoResult<UserPassStorageObject> {
-        let path = get_free_hba_path(UserPass, name);
+        let path = get_free_hba_path(StorageObjectType::UserPass, name);
         try!(make_path(&path));
 
         try!(write_control(&path, "dev_config", config));
@@ -554,16 +554,16 @@ impl StorageObject for UserPassStorageObject {
         self.path.clone()
     }
 
-    fn get_type(&self) -> StorageObjectType { UserPass }
+    fn get_type(&self) -> StorageObjectType { StorageObjectType::UserPass }
 }
 
 fn get_hba_prefix(kind: StorageObjectType) -> &'static str {
     match kind {
-        Block => "iblock",
-        Fileio => "fileio",
-        Ramdisk => "rd_mcp",
-        ScsiPass => "pscsi",
-        UserPass => "user",
+        StorageObjectType::Block => "iblock",
+        StorageObjectType::Fileio => "fileio",
+        StorageObjectType::Ramdisk => "rd_mcp",
+        StorageObjectType::ScsiPass => "pscsi",
+        StorageObjectType::UserPass => "user",
     }
 }
 
@@ -571,11 +571,11 @@ fn get_hba_type(path: &Path) -> Option<StorageObjectType> {
     let end_path = path.filename_str().unwrap();
     let idx = end_path.rfind('_').unwrap();
     match end_path.slice_to(idx) {
-        "iblock" => Some(Block),
-        "fileio" => Some(Fileio),
-        "rd_mcp" => Some(Ramdisk),
-        "pscsi" => Some(ScsiPass),
-        "user" => Some(UserPass),
+        "iblock" => Some(StorageObjectType::Block),
+        "fileio" => Some(StorageObjectType::Fileio),
+        "rd_mcp" => Some(StorageObjectType::Ramdisk),
+        "pscsi" => Some(StorageObjectType::ScsiPass),
+        "user" => Some(StorageObjectType::UserPass),
         _ => None
     }
 }
@@ -592,11 +592,11 @@ pub fn get_storage_objects() -> Vec<Box<StorageObject + 'static>> {
         for so_path in so_paths.into_iter()
             .filter(|p| p.is_dir()) {
             match get_hba_type(&path) {
-                Some(Block) => { sos.push(box BlockStorageObject { path: so_path }) },
-                Some(Fileio) => { sos.push(box FileioStorageObject { path: so_path }) },
-                Some(Ramdisk) => { sos.push(box RamdiskStorageObject { path: so_path }) },
-                Some(ScsiPass) => { sos.push(box ScsiPassStorageObject { path: so_path }) },
-                Some(UserPass) => { sos.push(box UserPassStorageObject { path: so_path }) },
+                Some(StorageObjectType::Block) => { sos.push(box BlockStorageObject { path: so_path }) },
+                Some(StorageObjectType::Fileio) => { sos.push(box FileioStorageObject { path: so_path }) },
+                Some(StorageObjectType::Ramdisk) => { sos.push(box RamdiskStorageObject { path: so_path }) },
+                Some(StorageObjectType::ScsiPass) => { sos.push(box ScsiPassStorageObject { path: so_path }) },
+                Some(StorageObjectType::UserPass) => { sos.push(box UserPassStorageObject { path: so_path }) },
                 None => { },
             }
         }
