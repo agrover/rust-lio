@@ -4,7 +4,7 @@ use std::path::Path;
 use std::io::fs::PathExtensions;
 use std::io::{File, Open, Write, Read, USER_DIR};
 use std::io::fs;
-use std::io::IoResult;
+use std::io::{IoResult, IoError, OtherIoError};
 use std::vec::Vec;
 use std::os;
 use uuid::Uuid;
@@ -30,6 +30,8 @@ pub enum FabricType {
     VHost,
     SBP2,
 }
+
+impl Copy for FabricType {}
 
 pub struct Fabric {
     path: Path,
@@ -93,7 +95,7 @@ fn get_val(path: &Path, attr: &str) -> IoResult<String> {
     let attr_path = Path::new(path).join(attr);
     let mut file = try!(File::open_mode(&attr_path, Open, Read));
     let str = try!(file.read_to_string());
-    Ok(str.as_slice().trim_right_chars('\n').to_string())
+    Ok(str.as_slice().trim_right().to_string())
 }
 
 fn set_val(path: &Path, attr: &str, value: &str) -> IoResult<()> {
@@ -125,12 +127,20 @@ fn set_dir_val(path: &Path, dir: &str, attr: &str, value: &str) -> IoResult<()> 
 
 fn get_bool(path: &Path, attr: &str) -> IoResult<bool> {
     let str = try!(get_val(path, attr));
-    Ok(from_str(str.as_slice()).unwrap())
+    match str.as_slice() {
+        "0" => Ok(false),
+        "1" => Ok(true),
+	_ => Err(IoError {
+            kind: OtherIoError,
+            desc: "invalid value from configfs",
+            detail: None
+        })
+    }
 }
 
 fn set_bool(path: &Path, attr: &str, value: bool) -> IoResult<()> {
-    let str = (value as uint).to_string();
-    set_val(path, attr, str.as_slice())
+    let val = (value as uint).to_string();
+    set_val(path, attr, val.as_slice())
 }
 
 pub struct Target {
@@ -157,7 +167,7 @@ impl Target {
     }
 
     pub fn get_tpg(&self) -> uint {
-        from_str(self.path.filename_str().unwrap().slice_from(5)).unwrap()
+        self.path.filename_str().unwrap().slice_from(5).parse().unwrap()
     }
 
     pub fn get_attribute(&self, attr: &str) -> IoResult<String> {
@@ -232,7 +242,7 @@ impl Portal {
     pub fn get_port(&self) -> uint {
         let end_path = self.path.filename_str().unwrap();
         let colon_idx = end_path.rfind(':').unwrap();
-        from_str(end_path.slice_from(colon_idx+1)).unwrap()
+        end_path.slice_from(colon_idx+1).parse().unwrap()
     }
 }
 
@@ -267,7 +277,7 @@ impl LUN {
     pub fn get_lun(&self) -> uint {
         let end_path = self.path.filename_str().unwrap();
         // chop off "lun_"
-        from_str(end_path.slice_from(4)).unwrap()
+        end_path.slice_from(4).parse().unwrap()
     }
 }
 
@@ -341,6 +351,8 @@ pub enum StorageObjectType {
     UserPass,
 }
 
+impl Copy for StorageObjectType {}
+
 pub trait StorageObject {
     fn get_path(&self) -> Path;
     fn get_type(&self) -> StorageObjectType;
@@ -378,11 +390,11 @@ pub struct BlockStorageObject {
 fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Path {
     let paths = fs::readdir(&Path::new(HBA_PATH)).unwrap();
 
-    let max = paths.into_iter()
+    let max: Option<int> = paths.into_iter()
         .filter(|p| p.filename_str().unwrap().starts_with(get_hba_prefix(kind)))
         .map(|p| {
             let idx = p.filename_str().unwrap().rfind('_').unwrap();
-            from_str::<uint>(p.filename_str().unwrap().slice_from(idx+1)).unwrap()
+            p.filename_str().unwrap().slice_from(idx+1).parse().unwrap()
         })
         .max();
 
@@ -491,7 +503,7 @@ fn get_hctl_for_dev(dev: &str) -> IoResult<(uint, uint, uint, uint)> {
     let paths = try!(fs::readdir(&path));
     let hctl_parts: Vec<uint> = paths[0].filename_str().unwrap()
         .split(':')
-        .map(|x| from_str(x).unwrap())
+        .map(|x| x.parse().unwrap())
         .collect();
 
     Ok((hctl_parts[0], hctl_parts[1], hctl_parts[2], hctl_parts[3]))
@@ -533,6 +545,8 @@ pub enum PassLevel {
     PassAll,
     PassIO,
 }
+
+impl Copy for PassLevel {}
 
 impl UserPassStorageObject {
     pub fn new(name: &str, size: u64, pass_level: PassLevel, config: &str) -> IoResult<UserPassStorageObject> {
@@ -592,11 +606,21 @@ pub fn get_storage_objects() -> Vec<Box<StorageObject + 'static>> {
         for so_path in so_paths.into_iter()
             .filter(|p| p.is_dir()) {
             match get_hba_type(&path) {
-                Some(StorageObjectType::Block) => { sos.push(box BlockStorageObject { path: so_path }) },
-                Some(StorageObjectType::Fileio) => { sos.push(box FileioStorageObject { path: so_path }) },
-                Some(StorageObjectType::Ramdisk) => { sos.push(box RamdiskStorageObject { path: so_path }) },
-                Some(StorageObjectType::ScsiPass) => { sos.push(box ScsiPassStorageObject { path: so_path }) },
-                Some(StorageObjectType::UserPass) => { sos.push(box UserPassStorageObject { path: so_path }) },
+                Some(StorageObjectType::Block) => {
+                    sos.push(box BlockStorageObject { path: so_path })
+                },
+                Some(StorageObjectType::Fileio) => {
+                    sos.push(box FileioStorageObject { path: so_path })
+                },
+                Some(StorageObjectType::Ramdisk) => {
+                    sos.push(box RamdiskStorageObject { path: so_path })
+                },
+                Some(StorageObjectType::ScsiPass) => {
+                    sos.push(box ScsiPassStorageObject { path: so_path })
+                },
+                Some(StorageObjectType::UserPass) => {
+                    sos.push(box UserPassStorageObject { path: so_path })
+                },
                 None => { },
             }
         }
