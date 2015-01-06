@@ -21,6 +21,7 @@ pub fn get_fabrics() -> Vec<Fabric> {
         .collect()
 }
 
+#[derive(Show, PartialEq, Copy)]
 pub enum FabricType {
     ISCSI,
     FCoE,
@@ -30,8 +31,6 @@ pub enum FabricType {
     VHost,
     SBP2,
 }
-
-impl Copy for FabricType {}
 
 pub struct Fabric {
     path: Path,
@@ -343,6 +342,7 @@ impl MappedLUN {
     }
 }
 
+#[derive(Show, PartialEq, Copy)]
 pub enum StorageObjectType {
     Block,
     Fileio,
@@ -350,8 +350,6 @@ pub enum StorageObjectType {
     ScsiPass,
     UserPass,
 }
-
-impl Copy for StorageObjectType {}
 
 pub trait StorageObject {
     fn get_path(&self) -> Path;
@@ -541,12 +539,11 @@ pub struct UserPassStorageObject {
     path: Path,
 }
 
+#[derive(Show, PartialEq, Copy)]
 pub enum PassLevel {
     PassAll,
     PassIO,
 }
-
-impl Copy for PassLevel {}
 
 impl UserPassStorageObject {
     pub fn new(name: &str, size: u64, pass_level: PassLevel, config: &str) -> IoResult<UserPassStorageObject> {
