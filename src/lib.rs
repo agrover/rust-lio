@@ -138,7 +138,7 @@ fn get_bool(path: &Path, attr: &str) -> IoResult<bool> {
 }
 
 fn set_bool(path: &Path, attr: &str, value: bool) -> IoResult<()> {
-    let val = (value as uint).to_string();
+    let val = (value as usize).to_string();
     set_val(path, attr, val.as_slice())
 }
 
@@ -153,7 +153,7 @@ pub struct Target {
 //
 impl Target {
 
-    pub fn new(fabric: &Fabric, name: &str, tpg: uint) -> IoResult<Target> {
+    pub fn new(fabric: &Fabric, name: &str, tpg: u32) -> IoResult<Target> {
         let path = fabric.path.join(name).join(format!("tpgt_{}", tpg));
         try!(make_path(&path));
         Ok(Target { path: path } )
@@ -165,7 +165,7 @@ impl Target {
         my_path.filename_str().unwrap().to_string()
     }
 
-    pub fn get_tpg(&self) -> uint {
+    pub fn get_tpg(&self) -> u32 {
         self.path.filename_str().unwrap().slice_from(5).parse().unwrap()
     }
 
@@ -225,7 +225,7 @@ pub struct Portal {
 
 impl Portal {
 
-    pub fn new(target: &Target, ip: &str, port: uint) -> IoResult<Portal> {
+    pub fn new(target: &Target, ip: &str, port: u16) -> IoResult<Portal> {
         let path = target.path.join(format!("{}:{}", ip, port));
         try!(make_path(&path));
         Ok(Portal { path: path } )
@@ -238,7 +238,7 @@ impl Portal {
     }
 
     // TODO: broken for ipv6
-    pub fn get_port(&self) -> uint {
+    pub fn get_port(&self) -> u16 {
         let end_path = self.path.filename_str().unwrap();
         let colon_idx = end_path.rfind(':').unwrap();
         end_path.slice_from(colon_idx+1).parse().unwrap()
@@ -260,7 +260,7 @@ fn lio_symlink(from: &Path, to: &Path) -> IoResult<()> {
 
 impl LUN {
 
-    pub fn new(target: &Target, so: &StorageObject, lun: uint) -> IoResult<LUN> {
+    pub fn new(target: &Target, so: &StorageObject, lun: u32) -> IoResult<LUN> {
         let end_part = format!("lun_{}", lun);
 
         // Make the LUN
@@ -273,7 +273,7 @@ impl LUN {
         Ok(LUN { path: path } )
     }
 
-    pub fn get_lun(&self) -> uint {
+    pub fn get_lun(&self) -> u32 {
         let end_path = self.path.filename_str().unwrap();
         // chop off "lun_"
         end_path.slice_from(4).parse().unwrap()
@@ -322,7 +322,7 @@ pub struct MappedLUN {
 
 impl MappedLUN {
 
-    pub fn new(acl: &ACL, tpg_lun: &LUN, lun: uint) -> IoResult<MappedLUN> {
+    pub fn new(acl: &ACL, tpg_lun: &LUN, lun: u32) -> IoResult<MappedLUN> {
         let path = acl.path.join(format!("lun_{}", lun.to_string()));
 
         try!(make_path(&path));
@@ -388,7 +388,7 @@ pub struct BlockStorageObject {
 fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Path {
     let paths = fs::readdir(&Path::new(HBA_PATH)).unwrap();
 
-    let max: Option<int> = paths.into_iter()
+    let max: Option<u32> = paths.into_iter()
         .filter(|p| p.filename_str().unwrap().starts_with(get_hba_prefix(kind)))
         .map(|p| {
             let idx = p.filename_str().unwrap().rfind('_').unwrap();
@@ -494,17 +494,17 @@ pub struct ScsiPassStorageObject {
     path: Path,
 }
 
-fn get_hctl_for_dev(dev: &str) -> IoResult<(uint, uint, uint, uint)> {
+fn get_hctl_for_dev(dev: &str) -> IoResult<(u8, u8, u8, u32)> {
     let path = Path::new("/sys/block");
     path.join_many(&[dev, "device", "scsi_device"]);
 
     let paths = try!(fs::readdir(&path));
-    let hctl_parts: Vec<uint> = paths[0].filename_str().unwrap()
+    let hctl_parts: Vec<u32> = paths[0].filename_str().unwrap()
         .split(':')
         .map(|x| x.parse().unwrap())
         .collect();
 
-    Ok((hctl_parts[0], hctl_parts[1], hctl_parts[2], hctl_parts[3]))
+    Ok((hctl_parts[0] as u8, hctl_parts[1] as u8, hctl_parts[2] as u8, hctl_parts[3]))
 }
 
 impl ScsiPassStorageObject {
@@ -551,7 +551,7 @@ impl UserPassStorageObject {
         try!(make_path(&path));
 
         try!(write_control(&path, "dev_config", config));
-        try!(write_control(&path, "pass_level", (pass_level as uint).to_string().as_slice()));
+        try!(write_control(&path, "pass_level", (pass_level as u8).to_string().as_slice()));
         try!(write_control(&path, "dev_size", size.to_string().as_slice()));
 
         try!(set_val(&path, "enable", "1"));
@@ -604,19 +604,19 @@ pub fn get_storage_objects() -> Vec<Box<StorageObject + 'static>> {
             .filter(|p| p.is_dir()) {
             match get_hba_type(&path) {
                 Some(StorageObjectType::Block) => {
-                    sos.push(box BlockStorageObject { path: so_path })
+                    sos.push(Box::new(BlockStorageObject { path: so_path }))
                 },
                 Some(StorageObjectType::Fileio) => {
-                    sos.push(box FileioStorageObject { path: so_path })
+                    sos.push(Box::new(FileioStorageObject { path: so_path }))
                 },
                 Some(StorageObjectType::Ramdisk) => {
-                    sos.push(box RamdiskStorageObject { path: so_path })
+                    sos.push(Box::new(RamdiskStorageObject { path: so_path }))
                 },
                 Some(StorageObjectType::ScsiPass) => {
-                    sos.push(box ScsiPassStorageObject { path: so_path })
+                    sos.push(Box::new(ScsiPassStorageObject { path: so_path }))
                 },
                 Some(StorageObjectType::UserPass) => {
-                    sos.push(box UserPassStorageObject { path: so_path })
+                    sos.push(Box::new(UserPassStorageObject { path: so_path }))
                 },
                 None => { },
             }
