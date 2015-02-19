@@ -1,12 +1,14 @@
+#![feature(path, io, core, env)]
+
 extern crate uuid;
 
-use std::path::Path;
-use std::io::fs::PathExtensions;
-use std::io::{File, Open, Write, Read, USER_DIR};
-use std::io::fs;
-use std::io::{IoResult, IoError, OtherIoError};
+use std::old_path::Path;
+use std::old_io::fs::PathExtensions;
+use std::old_io::{File, Open, Write, Read, USER_DIR};
+use std::old_io::fs;
+use std::old_io::{IoResult, IoError, OtherIoError};
 use std::vec::Vec;
-use std::os;
+use std::env;
 use uuid::Uuid;
 
 const TARGET_PATH: &'static str = "/sys/kernel/config/target/";
@@ -21,7 +23,7 @@ pub fn get_fabrics() -> Vec<Fabric> {
         .collect()
 }
 
-#[derive(Show, PartialEq, Copy)]
+#[derive(Debug, PartialEq, Copy)]
 pub enum FabricType {
     ISCSI,
     FCoE,
@@ -166,7 +168,7 @@ impl Target {
     }
 
     pub fn get_tpg(&self) -> u32 {
-        self.path.filename_str().unwrap().slice_from(5).parse().unwrap()
+        self.path.filename_str().unwrap()[5..].parse().unwrap()
     }
 
     pub fn get_attribute(&self, attr: &str) -> IoResult<String> {
@@ -234,14 +236,14 @@ impl Portal {
     pub fn get_ip(&self) -> String {
         let end_path = self.path.filename_str().unwrap();
         let colon_idx = end_path.rfind(':').unwrap();
-        end_path.slice_to(colon_idx).to_string()
+        end_path[..colon_idx].to_string()
     }
 
     // TODO: broken for ipv6
     pub fn get_port(&self) -> u16 {
         let end_path = self.path.filename_str().unwrap();
         let colon_idx = end_path.rfind(':').unwrap();
-        end_path.slice_from(colon_idx+1).parse().unwrap()
+        end_path[colon_idx+1..].parse().unwrap()
     }
 }
 
@@ -253,7 +255,7 @@ pub struct LUN {
 // Create a randomly-named link in "to" that points to "from"
 //
 fn lio_symlink(from: &Path, to: &Path) -> IoResult<()> {
-    let u4 = Uuid::new_v4().to_simple_string().as_slice().slice_to(10).to_string();
+    let u4 = Uuid::new_v4().to_simple_string().as_slice()[..10].to_string();
     try!(fs::symlink(from, &to.join(u4)));
     Ok(())
 }
@@ -276,7 +278,7 @@ impl LUN {
     pub fn get_lun(&self) -> u32 {
         let end_path = self.path.filename_str().unwrap();
         // chop off "lun_"
-        end_path.slice_from(4).parse().unwrap()
+        end_path[4..].parse().unwrap()
     }
 }
 
@@ -342,7 +344,7 @@ impl MappedLUN {
     }
 }
 
-#[derive(Show, PartialEq, Copy)]
+#[derive(Debug, PartialEq, Copy)]
 pub enum StorageObjectType {
     Block,
     Fileio,
@@ -392,7 +394,7 @@ fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Path {
         .filter(|p| p.filename_str().unwrap().starts_with(get_hba_prefix(kind)))
         .map(|p| {
             let idx = p.filename_str().unwrap().rfind('_').unwrap();
-            p.filename_str().unwrap().slice_from(idx+1).parse().unwrap()
+            p.filename_str().unwrap()[idx+1..].parse().unwrap()
         })
         .max();
 
@@ -473,7 +475,7 @@ impl RamdiskStorageObject {
 
         try!(make_path(&path));
 
-        let pages = size / os::page_size() as u64;
+        let pages = size / env::page_size() as u64;
 
         try!(set_val(&path, "rd_pages", pages.to_string().as_slice()));
         try!(set_val(&path, "enable", "1"));
@@ -539,7 +541,7 @@ pub struct UserPassStorageObject {
     path: Path,
 }
 
-#[derive(Show, PartialEq, Copy)]
+#[derive(Debug, PartialEq, Copy)]
 pub enum PassLevel {
     PassAll,
     PassIO,
@@ -581,7 +583,7 @@ fn get_hba_prefix(kind: StorageObjectType) -> &'static str {
 fn get_hba_type(path: &Path) -> Option<StorageObjectType> {
     let end_path = path.filename_str().unwrap();
     let idx = end_path.rfind('_').unwrap();
-    match end_path.slice_to(idx) {
+    match &end_path[..idx] {
         "iblock" => Some(StorageObjectType::Block),
         "fileio" => Some(StorageObjectType::Fileio),
         "rd_mcp" => Some(StorageObjectType::Ramdisk),
