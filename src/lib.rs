@@ -1,4 +1,4 @@
-#![feature(path, io, core, env)]
+#![feature(path, io, env)]
 
 extern crate uuid;
 
@@ -96,7 +96,7 @@ fn get_val(path: &Path, attr: &str) -> IoResult<String> {
     let attr_path = Path::new(path).join(attr);
     let mut file = try!(File::open_mode(&attr_path, Open, Read));
     let str = try!(file.read_to_string());
-    Ok(str.as_slice().trim_right().to_string())
+    Ok(str.trim_right().to_string())
 }
 
 fn set_val(path: &Path, attr: &str, value: &str) -> IoResult<()> {
@@ -113,7 +113,7 @@ fn set_val(path: &Path, attr: &str, value: &str) -> IoResult<()> {
 //
 fn write_control(path: &Path, attr: &str, value: &str) -> IoResult<()> {
     let output = format!("{}={}", attr, value);
-    set_val(path, "control", output.as_slice())
+    set_val(path, "control", &output)
 }
 
 fn get_dir_val(path: &Path, dir: &str, attr: &str) -> IoResult<String> {
@@ -128,7 +128,7 @@ fn set_dir_val(path: &Path, dir: &str, attr: &str, value: &str) -> IoResult<()> 
 
 fn get_bool(path: &Path, attr: &str) -> IoResult<bool> {
     let str = try!(get_val(path, attr));
-    match str.as_slice() {
+    match &str[..] {
         "0" => Ok(false),
         "1" => Ok(true),
 	_ => Err(IoError {
@@ -141,7 +141,7 @@ fn get_bool(path: &Path, attr: &str) -> IoResult<bool> {
 
 fn set_bool(path: &Path, attr: &str, value: bool) -> IoResult<()> {
     let val = (value as usize).to_string();
-    set_val(path, attr, val.as_slice())
+    set_val(path, attr, &val)
 }
 
 pub struct Target {
@@ -255,7 +255,7 @@ pub struct LUN {
 // Create a randomly-named link in "to" that points to "from"
 //
 fn lio_symlink(from: &Path, to: &Path) -> IoResult<()> {
-    let u4 = Uuid::new_v4().to_simple_string().as_slice()[..10].to_string();
+    let u4 = &Uuid::new_v4().to_simple_string()[..10];
     try!(fs::symlink(from, &to.join(u4)));
     Ok(())
 }
@@ -263,10 +263,8 @@ fn lio_symlink(from: &Path, to: &Path) -> IoResult<()> {
 impl LUN {
 
     pub fn new(target: &Target, so: &StorageObject, lun: u32) -> IoResult<LUN> {
-        let end_part = format!("lun_{}", lun);
-
         // Make the LUN
-        let path = target.path.join("lun").join(end_part);
+        let path = target.path.join("lun").join(format!("lun_{}", lun));
         try!(make_path(&path));
 
         // Link it to storage object
@@ -442,7 +440,7 @@ impl FileioStorageObject {
         if path.is_file() {
             try!(write_control(&path, "fd_dev_name", backing_file));
             let size = try!(path.stat()).size;
-            try!(write_control(&path, "fd_dev_size", size.to_string().as_slice()));
+            try!(write_control(&path, "fd_dev_size", &size.to_string()));
         }
 
         if write_back {
@@ -477,7 +475,7 @@ impl RamdiskStorageObject {
 
         let pages = size / env::page_size() as u64;
 
-        try!(set_val(&path, "rd_pages", pages.to_string().as_slice()));
+        try!(set_val(&path, "rd_pages", &pages.to_string()));
         try!(set_val(&path, "enable", "1"));
 
         Ok(RamdiskStorageObject{ path: path })
@@ -517,12 +515,12 @@ impl ScsiPassStorageObject {
 
         try!(make_path(&path));
 
-        try!(write_control(&path, "scsi_host_id", h.to_string().as_slice()));
-        try!(write_control(&path, "scsi_channel_id", c.to_string().as_slice()));
-        try!(write_control(&path, "scsi_target_id", t.to_string().as_slice()));
-        try!(write_control(&path, "scsi_lun_id", l.to_string().as_slice()));
+        try!(write_control(&path, "scsi_host_id", &h.to_string()));
+        try!(write_control(&path, "scsi_channel_id", &c.to_string()));
+        try!(write_control(&path, "scsi_target_id", &t.to_string()));
+        try!(write_control(&path, "scsi_lun_id", &l.to_string()));
 
-        try!(set_val(&path, "udev_path", format!("/dev/{}", backing_dev).as_slice()));
+        try!(set_val(&path, "udev_path", &format!("/dev/{}", &backing_dev)));
         try!(set_val(&path, "enable", "1"));
 
         Ok(ScsiPassStorageObject{ path: path })
@@ -553,8 +551,8 @@ impl UserPassStorageObject {
         try!(make_path(&path));
 
         try!(write_control(&path, "dev_config", config));
-        try!(write_control(&path, "pass_level", (pass_level as u8).to_string().as_slice()));
-        try!(write_control(&path, "dev_size", size.to_string().as_slice()));
+        try!(write_control(&path, "pass_level", &(pass_level as u8).to_string()));
+        try!(write_control(&path, "dev_size", &size.to_string()));
 
         try!(set_val(&path, "enable", "1"));
 
