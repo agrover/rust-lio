@@ -1,26 +1,33 @@
-#![feature(path, io, env)]
+#![feature(io, page_size, path_ext, collections)]
 
 extern crate uuid;
 
-use std::old_path::Path;
-use std::old_io::fs::PathExtensions;
-use std::old_io::{File, Open, Write, Read, USER_DIR};
-use std::old_io::fs;
-use std::old_io::{IoResult, IoError, OtherIoError};
-use std::vec::Vec;
+use std::fs;
+use std::fs::PathExt;
+use std::fs::File;
+use std::path::Path;
+use std::path::PathBuf;
+use std::io::{Result, Error, Read, Write};
+use std::io::ErrorKind::Other;
+use std::string::String;
+
 use std::env;
+use std::ffi::OsStr;
 use uuid::Uuid;
 
 const TARGET_PATH: &'static str = "/sys/kernel/config/target/";
 const HBA_PATH: &'static str = "/sys/kernel/config/target/core";
 
-pub fn get_fabrics() -> Vec<Fabric> {
-    let paths = fs::readdir(&Path::new(TARGET_PATH)).unwrap();
+pub fn get_fabrics() -> Result<Vec<Fabric>> {
+    let dir = try!(fs::read_dir(&PathBuf::new(TARGET_PATH)));
 
-    paths.into_iter()
-        .filter(|p| p.is_dir() && p.filename_str().unwrap() != "core")
-        .map(|p| Fabric { path: p } )
-        .collect()
+    Ok(dir
+       .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+       .filter(|path| path.is_dir())
+       .filter(|path| path.file_name().unwrap() != OsStr::from_str("core"))
+       .map(|path| Fabric { path: path } )
+       .collect()
+       )
 }
 
 #[derive(Debug, PartialEq, Copy)]
@@ -35,12 +42,12 @@ pub enum FabricType {
 }
 
 pub struct Fabric {
-    path: Path,
+    path: PathBuf,
 }
 
 impl Fabric {
 
-    pub fn new(kind: FabricType) -> IoResult<Fabric> {
+    pub fn new(kind: FabricType) -> Result<Fabric> {
         let dirname = match kind {
             FabricType::ISCSI => "iscsi",
             FabricType::FCoE => "tcm_fc",
@@ -51,58 +58,55 @@ impl Fabric {
             FabricType::SBP2 => "sbp",
         };
 
-        let path = Path::new(TARGET_PATH).join(dirname);
-        try!(maybe_make_path(&path));
+        let path = PathBuf::new(TARGET_PATH).join(dirname);
+        if !path.exists() {
+            try!(fs::create_dir_all(&path))
+        }
         Ok(Fabric { path: path } )
     }
 
-    pub fn get_discovery_auth(&self, attr: &str) -> IoResult<String> {
+    pub fn get_discovery_auth(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.path, "discovery_auth", attr)
     }
 
-    pub fn set_discovery_auth(&self, attr: &str, value: &str) -> IoResult<()> {
+    pub fn set_discovery_auth(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.path, "discovery_auth", attr, value)
     }
 
     pub fn get_targets(&self) -> Vec<Target> {
         let mut targets = Vec::new();
-        let fab_paths = fs::readdir(&Path::new(&self.path)).unwrap();
 
-        for t_path in fab_paths.into_iter()
-            .filter(|p| p.is_dir() && p.filename_str().unwrap() != "discovery_auth") {
-            let tpg_paths = fs::readdir(&Path::new(&t_path)).unwrap();
+        if let Ok(fab_paths) = fs::read_dir(&PathBuf::new(&self.path)) {
+            for t_path in fab_paths
+                .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+                .filter(|path| path.is_dir())
+                .filter(|path| path.file_name().unwrap() != OsStr::from_str("discovery_auth")) {
 
-            for tpg_path in tpg_paths.into_iter()
-                .filter(|p| p.filename_str().unwrap().starts_with("tpgt_")) {
-                targets.push(Target { path: tpg_path });
-            }
+                    if let Ok(tpg_paths) = fs::read_dir(&PathBuf::new(&t_path)) {
+                        for tpg_path in tpg_paths
+                            .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+                            .filter(|p| p.starts_with("tpgt_")) {
+                                targets.push(Target { path: tpg_path });
+                            }
+                    }
+                }
         }
         targets
     }
 }
 
-fn make_path(path: &Path) -> IoResult<()> {
-    fs::mkdir_recursive(path, USER_DIR)
-}
-
-fn maybe_make_path (path: &Path) -> IoResult<()> {
-    match path.stat() {
-        Ok(_) => Ok(()),
-        Err(_) => { fs::mkdir_recursive(path, USER_DIR) }
-    }
-}
-
-fn get_val(path: &Path, attr: &str) -> IoResult<String> {
-    let attr_path = Path::new(path).join(attr);
-    let mut file = try!(File::open_mode(&attr_path, Open, Read));
-    let str = try!(file.read_to_string());
+fn get_val(path: &Path, attr: &str) -> Result<String> {
+    let attr_path = PathBuf::new(path).join(attr);
+    let mut file = try!(File::open(&attr_path));
+    let mut str = String::new();
+    try!(file.read_to_string(&mut str));
     Ok(str.trim_right().to_string())
 }
 
-fn set_val(path: &Path, attr: &str, value: &str) -> IoResult<()> {
+fn set_val(path: &Path, attr: &str, value: &str) -> Result<()> {
     let attr_path = path.join(attr);
-    let mut file = try!(File::open_mode(&attr_path, Open, Write));
-    try!(file.write_str(value));
+    let mut file = try!(File::open(&attr_path));
+    try!(file.write_all(value.as_bytes()));
     Ok(())
 }
 
@@ -111,41 +115,37 @@ fn set_val(path: &Path, attr: &str, value: &str) -> IoResult<()> {
 // but then writes the string "$attr=$value".
 // (set_val writes "$value" to $path/$attr.)
 //
-fn write_control(path: &Path, attr: &str, value: &str) -> IoResult<()> {
+fn write_control(path: &Path, attr: &str, value: &str) -> Result<()> {
     let output = format!("{}={}", attr, value);
     set_val(path, "control", &output)
 }
 
-fn get_dir_val(path: &Path, dir: &str, attr: &str) -> IoResult<String> {
-    let dir_path = Path::new(path).join(dir);
+fn get_dir_val(path: &Path, dir: &str, attr: &str) -> Result<String> {
+    let dir_path = PathBuf::new(path).join(dir);
     get_val(&dir_path, attr)
 }
 
-fn set_dir_val(path: &Path, dir: &str, attr: &str, value: &str) -> IoResult<()> {
-    let dir_path = Path::new(path).join(dir);
+fn set_dir_val(path: &Path, dir: &str, attr: &str, value: &str) -> Result<()> {
+    let dir_path = PathBuf::new(path).join(dir);
     set_val(&dir_path, attr, value)
 }
 
-fn get_bool(path: &Path, attr: &str) -> IoResult<bool> {
+fn get_bool(path: &Path, attr: &str) -> Result<bool> {
     let str = try!(get_val(path, attr));
     match &str[..] {
         "0" => Ok(false),
         "1" => Ok(true),
-	_ => Err(IoError {
-            kind: OtherIoError,
-            desc: "invalid value from configfs",
-            detail: None
-        })
-    }
+	_ => Err(Error::new(Other, "invalid value from configfs",  None))
+        }
 }
 
-fn set_bool(path: &Path, attr: &str, value: bool) -> IoResult<()> {
+fn set_bool(path: &Path, attr: &str, value: bool) -> Result<()> {
     let val = (value as usize).to_string();
     set_val(path, attr, &val)
 }
 
 pub struct Target {
-    path: Path,
+    path: PathBuf,
 }
 
 //
@@ -155,177 +155,191 @@ pub struct Target {
 //
 impl Target {
 
-    pub fn new(fabric: &Fabric, name: &str, tpg: u32) -> IoResult<Target> {
-        let path = fabric.path.join(name).join(format!("tpgt_{}", tpg));
-        try!(make_path(&path));
+    pub fn new(fabric: &Fabric, name: &str, tpg: u32) -> Result<Target> {
+        let path = fabric.path.join(name).join(&format!("tpgt_{}", tpg));
+        try!(fs::create_dir_all(&path));
         Ok(Target { path: path } )
     }
 
     pub fn get_name(&self) -> String {
         let mut my_path = self.path.clone();
         my_path.pop();
-        my_path.filename_str().unwrap().to_string()
+        String::from_str(my_path.file_name().unwrap().to_str().unwrap())
     }
 
     pub fn get_tpg(&self) -> u32 {
-        self.path.filename_str().unwrap()[5..].parse().unwrap()
+        self.path.file_name().unwrap().to_str().unwrap()[5..].parse().unwrap()
     }
 
-    pub fn get_attribute(&self, attr: &str) -> IoResult<String> {
+    pub fn get_attribute(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.path, "attrib", attr)
     }
-    pub fn set_attribute(&self, attr: &str, value: &str) -> IoResult<()> {
+    pub fn set_attribute(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.path, "attrib", attr, value)
     }
 
-    pub fn get_param(&self, attr: &str) -> IoResult<String> {
+    pub fn get_param(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.path, "param", attr)
     }
-    pub fn set_param(&self, attr: &str, value: &str) -> IoResult<()> {
+    pub fn set_param(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.path, "param", attr, value)
     }
 
-    pub fn get_auth(&self, attr: &str) -> IoResult<String> {
+    pub fn get_auth(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.path, "auth", attr)
     }
-    pub fn set_auth(&self, attr: &str, value: &str) -> IoResult<()> {
+    pub fn set_auth(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.path, "auth", attr, value)
     }
 
-    pub fn get_enable(&self) -> IoResult<bool> {
+    pub fn get_enable(&self) -> Result<bool> {
         get_bool(&self.path, "enable")
     }
-    pub fn set_enable(&self, value: bool) -> IoResult<()> {
+    pub fn set_enable(&self, value: bool) -> Result<()> {
         set_bool(&self.path, "enable", value)
     }
 
-    pub fn get_acls(&self) -> Vec<ACL> {
-        let path = self.path.clone().join("acls");
-        let paths = fs::readdir(&Path::new(path)).unwrap();
+    pub fn get_acls(&self) -> Result<Vec<ACL>> {
+        let path = self.path.join("acls");
+        let paths = try!(fs::read_dir(&path));
 
-        paths.into_iter().map(|x| ACL {path: x}).collect()
+        Ok(paths
+           .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+           .map(|x| ACL {path: x})
+           .collect()
+           )
     }
 
-    pub fn get_luns(&self) -> Vec<LUN> {
-        let path = self.path.clone().join("lun");
-        let paths = fs::readdir(&Path::new(path)).unwrap();
+    pub fn get_luns(&self) -> Result<Vec<LUN>> {
+        let path = self.path.join("lun");
+        let paths = try!(fs::read_dir(&path));
 
-        paths.into_iter().map(|x| LUN {path: x}).collect()
+        Ok(paths
+           .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+           .map(|x| LUN {path: x})
+           .collect()
+           )
     }
 
-    pub fn get_portals(&self) -> Vec<Portal> {
-        let path = self.path.clone().join("np");
-        let paths = fs::readdir(&Path::new(path)).unwrap();
+    pub fn get_portals(&self) -> Result<Vec<Portal>> {
+        let path = self.path.join("np");
+        let paths = try!(fs::read_dir(&path));
 
-        paths.into_iter().map(|x| Portal {path: x}).collect()
+        Ok(paths
+           .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+           .map(|x| Portal {path: x})
+           .collect()
+           )
     }
 }
 
 pub struct Portal {
-    path: Path,
+    path: PathBuf,
 }
 
 impl Portal {
 
-    pub fn new(target: &Target, ip: &str, port: u16) -> IoResult<Portal> {
-        let path = target.path.join(format!("{}:{}", ip, port));
-        try!(make_path(&path));
+    pub fn new(target: &Target, ip: &str, port: u16) -> Result<Portal> {
+        let path = target.path.join(&format!("{}:{}", ip, port));
+        try!(fs::create_dir_all(&path));
         Ok(Portal { path: path } )
     }
 
     pub fn get_ip(&self) -> String {
-        let end_path = self.path.filename_str().unwrap();
+        let end_path = self.path.file_name().unwrap().to_str().unwrap();
         let colon_idx = end_path.rfind(':').unwrap();
         end_path[..colon_idx].to_string()
     }
 
     // TODO: broken for ipv6
     pub fn get_port(&self) -> u16 {
-        let end_path = self.path.filename_str().unwrap();
+        let end_path = self.path.file_name().unwrap().to_str().unwrap();
         let colon_idx = end_path.rfind(':').unwrap();
         end_path[colon_idx+1..].parse().unwrap()
     }
 }
 
 pub struct LUN {
-    path: Path,
+    path: PathBuf,
 }
 
 //
 // Create a randomly-named link in "to" that points to "from"
 //
-fn lio_symlink(from: &Path, to: &Path) -> IoResult<()> {
+fn lio_symlink(from: &Path, to: &Path) -> Result<()> {
     let u4 = &Uuid::new_v4().to_simple_string()[..10];
-    try!(fs::symlink(from, &to.join(u4)));
+    try!(fs::soft_link(from, &to.join(u4)));
     Ok(())
 }
 
 impl LUN {
 
-    pub fn new(target: &Target, so: &StorageObject, lun: u32) -> IoResult<LUN> {
+    pub fn new(target: &Target, so: &StorageObject, lun: u32) -> Result<LUN> {
         // Make the LUN
-        let path = target.path.join("lun").join(format!("lun_{}", lun));
-        try!(make_path(&path));
+        let path = target.path.join("lun").join(&format!("lun_{}", lun));
+        try!(fs::create_dir_all(&path));
 
         // Link it to storage object
-        try!(lio_symlink(&so.get_path(), &path));
+        try!(lio_symlink(so.get_path(), &path));
 
         Ok(LUN { path: path } )
     }
 
     pub fn get_lun(&self) -> u32 {
-        let end_path = self.path.filename_str().unwrap();
+        let end_path = self.path.file_name().unwrap().to_str().unwrap();
         // chop off "lun_"
         end_path[4..].parse().unwrap()
     }
 }
 
 pub struct ACL {
-    path: Path,
+    path: PathBuf,
 }
 
 impl ACL {
 
-    pub fn new(target: &Target, acl: &str) -> IoResult<ACL> {
+    pub fn new(target: &Target, acl: &str) -> Result<ACL> {
         let path = target.path.join(acl);
-        try!(make_path(&path));
+        try!(fs::create_dir_all(&path));
         Ok(ACL { path: path } )
     }
 
-    pub fn get_attribute(&self, attr: &str) -> IoResult<String> {
+    pub fn get_attribute(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.path, "attrib", attr)
     }
-    pub fn set_attribute(&self, attr: &str, value: &str) -> IoResult<()> {
+    pub fn set_attribute(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.path, "attrib", attr, value)
     }
 
-    pub fn get_param(&self, attr: &str) -> IoResult<String> {
+    pub fn get_param(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.path, "param", attr)
     }
-    pub fn set_param(&self, attr: &str, value: &str) -> IoResult<()> {
+    pub fn set_param(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.path, "param", attr, value)
     }
 
-    pub fn get_mapped_luns(&self) -> Vec<MappedLUN> {
-        let paths = fs::readdir(&self.path).unwrap();
+    pub fn get_mapped_luns(&self) -> Result<Vec<MappedLUN>> {
+        let paths = try!(fs::read_dir(&self.path));
 
-        paths.into_iter()
-            .filter(|p| p.filename_str().unwrap().starts_with("lun_"))
+        Ok(paths
+            .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+            .filter(|p| p.starts_with("lun_"))
             .map(|x| MappedLUN {path: x})
             .collect()
+           )
     }
 }
 
 pub struct MappedLUN {
-    path: Path,
+    path: PathBuf,
 }
 
 impl MappedLUN {
 
-    pub fn new(acl: &ACL, tpg_lun: &LUN, lun: u32) -> IoResult<MappedLUN> {
-        let path = acl.path.join(format!("lun_{}", lun.to_string()));
+    pub fn new(acl: &ACL, tpg_lun: &LUN, lun: u32) -> Result<MappedLUN> {
+        let path = acl.path.join(&format!("lun_{}", lun.to_string()));
 
-        try!(make_path(&path));
+        try!(fs::create_dir_all(&path));
 
         // Link it to storage object
         try!(lio_symlink(&tpg_lun.path, &path));
@@ -333,11 +347,11 @@ impl MappedLUN {
         Ok(MappedLUN { path: path })
     }
 
-    pub fn get_write_protect(&self) -> IoResult<bool> {
+    pub fn get_write_protect(&self) -> Result<bool> {
         get_bool(&self.path, "write_protect")
     }
 
-    pub fn set_write_protect(&self, value: bool) -> IoResult<()> {
+    pub fn set_write_protect(&self, value: bool) -> Result<()> {
         set_bool(&self.path, "write_protect", value)
     }
 }
@@ -352,47 +366,48 @@ pub enum StorageObjectType {
 }
 
 pub trait StorageObject {
-    fn get_path(&self) -> Path;
+    fn get_path(&self) -> &Path;
     fn get_type(&self) -> StorageObjectType;
 
-    fn get_attribute(&self, attr: &str) -> IoResult<String> {
+    fn get_attribute(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.get_path(), "attrib", attr)
     }
 
-    fn set_attribute(&self, attr: &str, value: &str) -> IoResult<()> {
-        set_dir_val(&self.get_path(), "attrib", attr, value)
+    fn set_attribute(&self, attr: &str, value: &str) -> Result<()> {
+        set_dir_val(self.get_path(), "attrib", attr, value)
     }
 
-    fn get_pr(&self, attr: &str) -> IoResult<String> {
+    fn get_pr(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.get_path(), "pr", attr)
     }
 
-    fn set_pr(&self, attr: &str, value: &str) -> IoResult<()> {
+    fn set_pr(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.get_path(), "pr", attr, value)
     }
 
-    fn get_wwn(&self, attr: &str) -> IoResult<String> {
+    fn get_wwn(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.get_path(), "wwn", attr)
     }
 
-    fn set_wwn(&self, attr: &str, value: &str) -> IoResult<()> {
+    fn set_wwn(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.get_path(), "wwn", attr, value)
     }
 }
 
 pub struct BlockStorageObject {
-    path: Path,
+    path: PathBuf,
 }
 
 // TODO: err out if (type, name) already exists?
-fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Path {
-    let paths = fs::readdir(&Path::new(HBA_PATH)).unwrap();
+fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Result<PathBuf> {
+    let paths = try!(fs::read_dir(&PathBuf::new(HBA_PATH)));
 
-    let max: Option<u32> = paths.into_iter()
-        .filter(|p| p.filename_str().unwrap().starts_with(get_hba_prefix(kind)))
+    let max: Option<u32> = paths
+        .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+        .filter(|p| p.starts_with(get_hba_prefix(kind)))
         .map(|p| {
-            let idx = p.filename_str().unwrap().rfind('_').unwrap();
-            p.filename_str().unwrap()[idx+1..].parse().unwrap()
+            let idx = p.to_str().unwrap().rfind('_').unwrap();
+            p.to_str().unwrap()[idx+1..].parse().unwrap()
         })
         .max();
 
@@ -403,14 +418,14 @@ fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Path {
 
     let hba_name = format!("{}_{}", get_hba_prefix(kind), new_val);
 
-    Path::new(HBA_PATH).join(hba_name).join(name)
+    Ok(PathBuf::new(HBA_PATH).join(&hba_name).join(name))
 }
 
 impl BlockStorageObject {
-    pub fn new(name: &str, backing_dev: &str) -> IoResult<BlockStorageObject> {
-        let path = get_free_hba_path(StorageObjectType::Block, name);
+    pub fn new(name: &str, backing_dev: &str) -> Result<BlockStorageObject> {
+        let path = try!(get_free_hba_path(StorageObjectType::Block, name));
 
-        try!(make_path(&path));
+        try!(fs::create_dir_all(&path));
         try!(write_control(&path, "udev_path", backing_dev));
         try!(set_val(&path, "enable", "1"));
 
@@ -419,27 +434,27 @@ impl BlockStorageObject {
 }
 
 impl StorageObject for BlockStorageObject {
-    fn get_path(&self) -> Path {
-        self.path.clone()
+    fn get_path(&self) -> &Path {
+        &self.path
     }
 
     fn get_type(&self) -> StorageObjectType { StorageObjectType::Block }
 }
 
 pub struct FileioStorageObject {
-    path: Path,
+    path: PathBuf,
 }
 
 impl FileioStorageObject {
-    pub fn new(name: &str, backing_file: &str, write_back: bool) -> IoResult<FileioStorageObject> {
-        let path = get_free_hba_path(StorageObjectType::Fileio, name);
+    pub fn new(name: &str, backing_file: &str, write_back: bool) -> Result<FileioStorageObject> {
+        let path = try!(get_free_hba_path(StorageObjectType::Fileio, name));
 
-        try!(make_path(&path));
+        try!(fs::create_dir_all(&path));
 
         // backing file must exist
         if path.is_file() {
             try!(write_control(&path, "fd_dev_name", backing_file));
-            let size = try!(path.stat()).size;
+            let size = try!(fs::metadata(&path)).len();
             try!(write_control(&path, "fd_dev_size", &size.to_string()));
         }
 
@@ -456,22 +471,22 @@ impl FileioStorageObject {
 }
 
 impl StorageObject for FileioStorageObject {
-    fn get_path(&self) -> Path {
-        self.path.clone()
+    fn get_path(&self) -> &Path {
+        &self.path
     }
 
     fn get_type(&self) -> StorageObjectType { StorageObjectType::Fileio }
 }
 
 pub struct RamdiskStorageObject {
-    path: Path,
+    path: PathBuf,
 }
 
 impl RamdiskStorageObject {
-    pub fn new(name: &str, size: u64) -> IoResult<RamdiskStorageObject> {
-        let path = get_free_hba_path(StorageObjectType::Ramdisk, name);
+    pub fn new(name: &str, size: u64) -> Result<RamdiskStorageObject> {
+        let path = try!(get_free_hba_path(StorageObjectType::Ramdisk, name));
 
-        try!(make_path(&path));
+        try!(fs::create_dir_all(&path));
 
         let pages = size / env::page_size() as u64;
 
@@ -483,23 +498,26 @@ impl RamdiskStorageObject {
 }
 
 impl StorageObject for RamdiskStorageObject {
-    fn get_path(&self) -> Path {
-        self.path.clone()
+    fn get_path(&self) -> &Path {
+        &self.path
     }
 
     fn get_type(&self) -> StorageObjectType { StorageObjectType::Ramdisk }
 }
 
 pub struct ScsiPassStorageObject {
-    path: Path,
+    path: PathBuf,
 }
 
-fn get_hctl_for_dev(dev: &str) -> IoResult<(u8, u8, u8, u32)> {
-    let path = Path::new("/sys/block");
-    path.join_many(&[dev, "device", "scsi_device"]);
+fn get_hctl_for_dev(dev: &str) -> Result<(u8, u8, u8, u32)> {
+    let mut path = PathBuf::new("/sys/block");
+    path.push(dev);
+    path.push("device");
+    path.push("scsi_device");
 
-    let paths = try!(fs::readdir(&path));
-    let hctl_parts: Vec<u32> = paths[0].filename_str().unwrap()
+    let mut paths = try!(fs::read_dir(&path));
+    let first_path = paths.next();
+    let hctl_parts: Vec<u32> = first_path.unwrap().unwrap().path().file_name().unwrap().to_str().unwrap()
         .split(':')
         .map(|x| x.parse().unwrap())
         .collect();
@@ -508,12 +526,12 @@ fn get_hctl_for_dev(dev: &str) -> IoResult<(u8, u8, u8, u32)> {
 }
 
 impl ScsiPassStorageObject {
-    pub fn new(name: &str, backing_dev: &str) -> IoResult<ScsiPassStorageObject> {
-        let path = get_free_hba_path(StorageObjectType::ScsiPass, name);
+    pub fn new(name: &str, backing_dev: &str) -> Result<ScsiPassStorageObject> {
+        let path = try!(get_free_hba_path(StorageObjectType::ScsiPass, name));
 
         let (h, c, t, l) = try!(get_hctl_for_dev(backing_dev));
 
-        try!(make_path(&path));
+        try!(fs::create_dir_all(&path));
 
         try!(write_control(&path, "scsi_host_id", &h.to_string()));
         try!(write_control(&path, "scsi_channel_id", &c.to_string()));
@@ -528,15 +546,15 @@ impl ScsiPassStorageObject {
 }
 
 impl StorageObject for ScsiPassStorageObject {
-    fn get_path(&self) -> Path {
-        self.path.clone()
+    fn get_path(&self) -> &Path {
+        &self.path
     }
 
     fn get_type(&self) -> StorageObjectType { StorageObjectType::ScsiPass }
 }
 
 pub struct UserPassStorageObject {
-    path: Path,
+    path: PathBuf,
 }
 
 #[derive(Debug, PartialEq, Copy)]
@@ -546,9 +564,9 @@ pub enum PassLevel {
 }
 
 impl UserPassStorageObject {
-    pub fn new(name: &str, size: u64, pass_level: PassLevel, config: &str) -> IoResult<UserPassStorageObject> {
-        let path = get_free_hba_path(StorageObjectType::UserPass, name);
-        try!(make_path(&path));
+    pub fn new(name: &str, size: u64, pass_level: PassLevel, config: &str) -> Result<UserPassStorageObject> {
+        let path = try!(get_free_hba_path(StorageObjectType::UserPass, name));
+        try!(fs::create_dir_all(&path));
 
         try!(write_control(&path, "dev_config", config));
         try!(write_control(&path, "pass_level", &(pass_level as u8).to_string()));
@@ -561,8 +579,8 @@ impl UserPassStorageObject {
 }
 
 impl StorageObject for UserPassStorageObject {
-    fn get_path(&self) -> Path {
-        self.path.clone()
+    fn get_path(&self) -> &Path {
+        &self.path
     }
 
     fn get_type(&self) -> StorageObjectType { StorageObjectType::UserPass }
@@ -578,8 +596,8 @@ fn get_hba_prefix(kind: StorageObjectType) -> &'static str {
     }
 }
 
-fn get_hba_type(path: &Path) -> Option<StorageObjectType> {
-    let end_path = path.filename_str().unwrap();
+fn get_hba_type(path: &PathBuf) -> Option<StorageObjectType> {
+    let end_path = path.file_name().unwrap().to_str().unwrap();
     let idx = end_path.rfind('_').unwrap();
     match &end_path[..idx] {
         "iblock" => Some(StorageObjectType::Block),
@@ -591,39 +609,44 @@ fn get_hba_type(path: &Path) -> Option<StorageObjectType> {
     }
 }
 
-pub fn get_storage_objects() -> Vec<Box<StorageObject + 'static>> {
-    let hba_paths = fs::readdir(&Path::new(HBA_PATH)).unwrap();
+pub fn get_storage_objects() -> Result<Vec<Box<StorageObject + 'static>>> {
+    let hba_paths = try!(fs::read_dir(&PathBuf::new(HBA_PATH)));
 
     let mut sos: Vec<Box<StorageObject>> = Vec::new();
 
-    for path in hba_paths.into_iter()
-        .filter(|p| p.is_dir() && p.filename_str().unwrap() != "alua") {
-        let so_paths = fs::readdir(&Path::new(&path)).unwrap();
+    for hba_path in hba_paths
+        .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+        .filter(|p| p.is_dir())
+        .filter(|p| p.file_name().unwrap() != OsStr::from_str("alua")) {
 
-        for so_path in so_paths.into_iter()
-            .filter(|p| p.is_dir()) {
-            match get_hba_type(&path) {
-                Some(StorageObjectType::Block) => {
-                    sos.push(Box::new(BlockStorageObject { path: so_path }))
-                },
-                Some(StorageObjectType::Fileio) => {
-                    sos.push(Box::new(FileioStorageObject { path: so_path }))
-                },
-                Some(StorageObjectType::Ramdisk) => {
-                    sos.push(Box::new(RamdiskStorageObject { path: so_path }))
-                },
-                Some(StorageObjectType::ScsiPass) => {
-                    sos.push(Box::new(ScsiPassStorageObject { path: so_path }))
-                },
-                Some(StorageObjectType::UserPass) => {
-                    sos.push(Box::new(UserPassStorageObject { path: so_path }))
-                },
-                None => { },
+            if let Ok(so_paths) = fs::read_dir(&PathBuf::new(&hba_path)) {
+                for so_path in so_paths
+                    .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+                    .filter(|path| path.is_dir()) {
+                        match get_hba_type(&so_path) {
+                            Some(StorageObjectType::Block) => {
+                                sos.push(Box::new(BlockStorageObject { path: so_path }))
+                            },
+                            Some(StorageObjectType::Fileio) => {
+                                sos.push(Box::new(FileioStorageObject { path: so_path }))
+                            },
+                            Some(StorageObjectType::Ramdisk) => {
+                                sos.push(Box::new(RamdiskStorageObject { path: so_path }))
+                            },
+                            Some(StorageObjectType::ScsiPass) => {
+                                sos.push(Box::new(ScsiPassStorageObject { path: so_path }))
+                            },
+                            Some(StorageObjectType::UserPass) => {
+                                sos.push(Box::new(UserPassStorageObject { path: so_path }))
+                            },
+                            None => { },
+                        }
+                    }
+                }
             }
-        }
-    }
-    sos
+    Ok(sos)
 }
+
 
 #[test]
 fn it_works() {
