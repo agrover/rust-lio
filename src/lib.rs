@@ -12,7 +12,6 @@ use std::io::ErrorKind::Other;
 use std::string::String;
 
 use std::env;
-use std::ffi::OsStr;
 use uuid::Uuid;
 
 const TARGET_PATH: &'static str = "/sys/kernel/config/target/";
@@ -24,7 +23,7 @@ pub fn get_fabrics() -> Result<Vec<Fabric>> {
     Ok(dir
        .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
        .filter(|path| path.is_dir())
-       .filter(|path| path.file_name().unwrap() != OsStr::from_str("core"))
+       .filter(|path| path.file_name().unwrap() != "core")
        .map(|path| Fabric { path: path } )
        .collect()
        )
@@ -80,7 +79,7 @@ impl Fabric {
             for t_path in fab_paths
                 .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
                 .filter(|path| path.is_dir())
-                .filter(|path| path.file_name().unwrap() != OsStr::from_str("discovery_auth")) {
+                .filter(|path| path.file_name().unwrap() != "discovery_auth") {
 
                     if let Ok(tpg_paths) = fs::read_dir(&t_path) {
                         for tpg_path in tpg_paths
@@ -615,7 +614,7 @@ pub fn get_storage_objects() -> Result<Vec<Box<StorageObject + 'static>>> {
     for hba_path in hba_paths
         .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
         .filter(|p| p.is_dir())
-        .filter(|p| p.file_name().unwrap() != OsStr::from_str("alua")) {
+        .filter(|p| p.file_name().unwrap() != "alua") {
 
             if let Ok(so_paths) = fs::read_dir(&hba_path) {
                 for so_path in so_paths
