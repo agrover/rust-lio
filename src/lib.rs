@@ -606,7 +606,6 @@ fn get_hba_type(path: &PathBuf) -> Option<StorageObjectType> {
 
 pub fn get_storage_objects() -> Result<Vec<Box<StorageObject + 'static>>> {
     let hba_paths = try!(fs::read_dir(HBA_PATH));
-
     let mut sos: Vec<Box<StorageObject>> = Vec::new();
 
     for hba_path in hba_paths
