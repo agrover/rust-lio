@@ -72,25 +72,23 @@ impl Fabric {
         set_dir_val(&self.path, "discovery_auth", attr, value)
     }
 
-    pub fn get_targets(&self) -> Vec<Target> {
+    pub fn get_targets(&self) -> Result<Vec<Target>> {
         let mut targets = Vec::new();
+        let fab_paths = try!(fs::read_dir(&self.path));
 
-        if let Ok(fab_paths) = fs::read_dir(&self.path) {
-            for t_path in fab_paths
-                .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
-                .filter(|path| path.is_dir())
-                .filter(|path| path.file_name().unwrap() != "discovery_auth") {
+        for t_path in fab_paths
+            .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+            .filter(|path| path.is_dir())
+            .filter(|path| path.file_name().unwrap() != "discovery_auth") {
+                let tpg_paths = try!(fs::read_dir(&t_path));
 
-                    if let Ok(tpg_paths) = fs::read_dir(&t_path) {
-                        for tpg_path in tpg_paths
-                            .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
-                            .filter(|p| p.starts_with("tpgt_")) {
-                                targets.push(Target { path: tpg_path });
-                            }
+                for tpg_path in tpg_paths
+                    .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+                    .filter(|p| p.starts_with("tpgt_")) {
+                        targets.push(Target { path: tpg_path });
                     }
-                }
-        }
-        targets
+            }
+        Ok(targets)
     }
 }
 
