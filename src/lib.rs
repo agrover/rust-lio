@@ -19,7 +19,7 @@ const TARGET_PATH: &'static str = "/sys/kernel/config/target/";
 const HBA_PATH: &'static str = "/sys/kernel/config/target/core";
 
 pub fn get_fabrics() -> Result<Vec<Fabric>> {
-    let dir = try!(fs::read_dir(&PathBuf::new(TARGET_PATH)));
+    let dir = try!(fs::read_dir(TARGET_PATH));
 
     Ok(dir
        .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
@@ -76,13 +76,13 @@ impl Fabric {
     pub fn get_targets(&self) -> Vec<Target> {
         let mut targets = Vec::new();
 
-        if let Ok(fab_paths) = fs::read_dir(&PathBuf::new(&self.path)) {
+        if let Ok(fab_paths) = fs::read_dir(&self.path) {
             for t_path in fab_paths
                 .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
                 .filter(|path| path.is_dir())
                 .filter(|path| path.file_name().unwrap() != OsStr::from_str("discovery_auth")) {
 
-                    if let Ok(tpg_paths) = fs::read_dir(&PathBuf::new(&t_path)) {
+                    if let Ok(tpg_paths) = fs::read_dir(&t_path) {
                         for tpg_path in tpg_paths
                             .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
                             .filter(|p| p.starts_with("tpgt_")) {
@@ -96,7 +96,7 @@ impl Fabric {
 }
 
 fn get_val(path: &Path, attr: &str) -> Result<String> {
-    let attr_path = PathBuf::new(path).join(attr);
+    let attr_path = path.join(attr);
     let mut file = try!(File::open(&attr_path));
     let mut str = String::new();
     try!(file.read_to_string(&mut str));
@@ -121,13 +121,11 @@ fn write_control(path: &Path, attr: &str, value: &str) -> Result<()> {
 }
 
 fn get_dir_val(path: &Path, dir: &str, attr: &str) -> Result<String> {
-    let dir_path = PathBuf::new(path).join(dir);
-    get_val(&dir_path, attr)
+    get_val(&path.join(dir), attr)
 }
 
 fn set_dir_val(path: &Path, dir: &str, attr: &str, value: &str) -> Result<()> {
-    let dir_path = PathBuf::new(path).join(dir);
-    set_val(&dir_path, attr, value)
+    set_val(&path.join(dir), attr, value)
 }
 
 fn get_bool(path: &Path, attr: &str) -> Result<bool> {
@@ -400,7 +398,7 @@ pub struct BlockStorageObject {
 
 // TODO: err out if (type, name) already exists?
 fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Result<PathBuf> {
-    let paths = try!(fs::read_dir(&PathBuf::new(HBA_PATH)));
+    let paths = try!(fs::read_dir(HBA_PATH));
 
     let max: Option<u32> = paths
         .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
@@ -610,7 +608,7 @@ fn get_hba_type(path: &PathBuf) -> Option<StorageObjectType> {
 }
 
 pub fn get_storage_objects() -> Result<Vec<Box<StorageObject + 'static>>> {
-    let hba_paths = try!(fs::read_dir(&PathBuf::new(HBA_PATH)));
+    let hba_paths = try!(fs::read_dir(HBA_PATH));
 
     let mut sos: Vec<Box<StorageObject>> = Vec::new();
 
@@ -619,7 +617,7 @@ pub fn get_storage_objects() -> Result<Vec<Box<StorageObject + 'static>>> {
         .filter(|p| p.is_dir())
         .filter(|p| p.file_name().unwrap() != OsStr::from_str("alua")) {
 
-            if let Ok(so_paths) = fs::read_dir(&PathBuf::new(&hba_path)) {
+            if let Ok(so_paths) = fs::read_dir(&hba_path) {
                 for so_path in so_paths
                     .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
                     .filter(|path| path.is_dir()) {
