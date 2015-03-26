@@ -1,4 +1,4 @@
-#![feature(io, page_size, path_ext, collections)]
+#![feature(io, page_size, path_ext, collections, convert)]
 
 extern crate uuid;
 
@@ -57,7 +57,7 @@ impl Fabric {
             FabricType::SBP2 => "sbp",
         };
 
-        let path = PathBuf::new(TARGET_PATH).join(dirname);
+        let path = PathBuf::from(TARGET_PATH).join(dirname);
         if !path.exists() {
             try!(fs::create_dir_all(&path))
         }
@@ -413,7 +413,7 @@ fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Result<PathBuf> {
 
     let hba_name = format!("{}_{}", get_hba_prefix(kind), new_val);
 
-    Ok(PathBuf::new(HBA_PATH).join(&hba_name).join(name))
+    Ok(PathBuf::from(HBA_PATH).join(&hba_name).join(name))
 }
 
 impl BlockStorageObject {
@@ -505,7 +505,7 @@ pub struct ScsiPassStorageObject {
 }
 
 fn get_hctl_for_dev(dev: &str) -> Result<(u8, u8, u8, u32)> {
-    let mut path = PathBuf::new("/sys/block");
+    let mut path = PathBuf::from("/sys/block");
     path.push(dev);
     path.push("device");
     path.push("scsi_device");
