@@ -1,4 +1,4 @@
-#![feature(io, page_size, path_ext, collections, convert)]
+#![feature(page_size, path_ext, collections)]
 
 extern crate uuid;
 
@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::io::{Result, Error, Read, Write};
 use std::io::ErrorKind::Other;
 use std::string::String;
+use std::os::unix;
 
 use std::env;
 use uuid::Uuid;
@@ -29,7 +30,7 @@ pub fn get_fabrics() -> Result<Vec<Fabric>> {
        )
 }
 
-#[derive(Debug, PartialEq, Copy)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum FabricType {
     ISCSI,
     FCoE,
@@ -130,7 +131,7 @@ fn get_bool(path: &Path, attr: &str) -> Result<bool> {
     match &str[..] {
         "0" => Ok(false),
         "1" => Ok(true),
-	_ => Err(Error::new(Other, "invalid value from configfs",  None))
+	_ => Err(Error::new(Other, "invalid value from configfs"))
         }
 }
 
@@ -263,7 +264,7 @@ pub struct LUN {
 //
 fn lio_symlink(from: &Path, to: &Path) -> Result<()> {
     let u4 = &Uuid::new_v4().to_simple_string()[..10];
-    try!(fs::soft_link(from, &to.join(u4)));
+    try!(unix::fs::symlink(from, &to.join(u4)));
     Ok(())
 }
 
@@ -351,7 +352,7 @@ impl MappedLUN {
     }
 }
 
-#[derive(Debug, PartialEq, Copy)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum StorageObjectType {
     Block,
     Fileio,
@@ -552,7 +553,7 @@ pub struct UserPassStorageObject {
     path: PathBuf,
 }
 
-#[derive(Debug, PartialEq, Copy)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum PassLevel {
     PassAll,
     PassIO,
@@ -604,40 +605,36 @@ fn get_hba_type(path: &PathBuf) -> Option<StorageObjectType> {
     }
 }
 
-pub fn get_storage_objects() -> Result<Vec<Box<StorageObject + 'static>>> {
-    let hba_paths = try!(fs::read_dir(HBA_PATH));
+pub fn get_storage_objects() -> Result<Vec<Box<StorageObject>>> {
     let mut sos: Vec<Box<StorageObject>> = Vec::new();
 
-    for hba_path in hba_paths
+    for hba_path in try!(fs::read_dir(HBA_PATH))
         .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
         .filter(|p| p.is_dir())
         .filter(|p| p.file_name().unwrap() != "alua") {
-
-            if let Ok(so_paths) = fs::read_dir(&hba_path) {
-                for so_path in so_paths
-                    .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
-                    .filter(|path| path.is_dir()) {
-                        match get_hba_type(&so_path) {
-                            Some(StorageObjectType::Block) => {
-                                sos.push(Box::new(BlockStorageObject { path: so_path }))
-                            },
-                            Some(StorageObjectType::Fileio) => {
-                                sos.push(Box::new(FileioStorageObject { path: so_path }))
-                            },
-                            Some(StorageObjectType::Ramdisk) => {
-                                sos.push(Box::new(RamdiskStorageObject { path: so_path }))
-                            },
-                            Some(StorageObjectType::ScsiPass) => {
-                                sos.push(Box::new(ScsiPassStorageObject { path: so_path }))
-                            },
-                            Some(StorageObjectType::UserPass) => {
-                                sos.push(Box::new(UserPassStorageObject { path: so_path }))
-                            },
-                            None => { },
-                        }
+            for so_path in try!(fs::read_dir(&hba_path))
+                .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+                .filter(|path| path.is_dir()) {
+                    match get_hba_type(&so_path) {
+                        Some(StorageObjectType::Block) => {
+                            sos.push(Box::new(BlockStorageObject { path: so_path }))
+                        },
+                        Some(StorageObjectType::Fileio) => {
+                            sos.push(Box::new(FileioStorageObject { path: so_path }))
+                        },
+                        Some(StorageObjectType::Ramdisk) => {
+                            sos.push(Box::new(RamdiskStorageObject { path: so_path }))
+                        },
+                        Some(StorageObjectType::ScsiPass) => {
+                            sos.push(Box::new(ScsiPassStorageObject { path: so_path }))
+                        },
+                        Some(StorageObjectType::UserPass) => {
+                            sos.push(Box::new(UserPassStorageObject { path: so_path }))
+                        },
+                        None => { },
                     }
                 }
-            }
+        }
     Ok(sos)
 }
 
