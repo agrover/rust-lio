@@ -1,19 +1,40 @@
-#![feature(page_size, path_ext, collections)]
-
 extern crate uuid;
 
 use std::fs;
-use std::fs::PathExt;
 use std::fs::File;
 use std::path::Path;
 use std::path::PathBuf;
 use std::io::{Result, Error, Read, Write};
 use std::io::ErrorKind::Other;
 use std::string::String;
-use std::os::unix;
 
-use std::env;
 use uuid::Uuid;
+
+// TODO: Replace once PathExt is stable
+trait MyPathExt {
+    fn exists(&self) -> bool;
+    fn is_file(&self) -> bool;
+    fn is_dir(&self) -> bool;
+}
+
+impl MyPathExt for Path {
+    fn exists(&self) -> bool {
+        self.is_dir() || self.is_file()
+    }
+    fn is_file(&self) -> bool {
+        match fs::metadata(self) {
+            Ok(m) => m.is_file(),
+            Err(_) => false
+        }
+    }
+    fn is_dir(&self) -> bool {
+        match fs::metadata(self) {
+            Ok(m) => m.is_dir(),
+            Err(_) => false
+        }
+    }
+
+}
 
 const TARGET_PATH: &'static str = "/sys/kernel/config/target/";
 const HBA_PATH: &'static str = "/sys/kernel/config/target/core";
@@ -160,7 +181,7 @@ impl Target {
     pub fn get_name(&self) -> String {
         let mut my_path = self.path.clone();
         my_path.pop();
-        String::from_str(my_path.file_name().unwrap().to_str().unwrap())
+        my_path.file_name().unwrap().to_string_lossy().into_owned()
     }
 
     pub fn get_tpg(&self) -> u32 {
@@ -264,7 +285,7 @@ pub struct LUN {
 //
 fn lio_symlink(from: &Path, to: &Path) -> Result<()> {
     let u4 = &Uuid::new_v4().to_simple_string()[..10];
-    try!(unix::fs::symlink(from, &to.join(u4)));
+    try!(fs::soft_link(from, &to.join(u4)));
     Ok(())
 }
 
@@ -484,7 +505,10 @@ impl RamdiskStorageObject {
 
         try!(fs::create_dir_all(&path));
 
-        let pages = size / env::page_size() as u64;
+        // TODO: use env::page_size()
+        let page_size = 4096;
+
+        let pages = size / page_size as u64;
 
         try!(set_val(&path, "rd_pages", &pages.to_string()));
         try!(set_val(&path, "enable", "1"));
