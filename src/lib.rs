@@ -9,6 +9,8 @@ use std::io::{Result, Error, Read, Write};
 use std::io::ErrorKind::Other;
 use std::string::String;
 
+use std::os::unix::fs::symlink;
+
 use uuid::Uuid;
 
 // TODO: Replace once PathExt is stable
@@ -286,7 +288,7 @@ pub struct LUN {
 //
 fn lio_symlink(from: &Path, to: &Path) -> Result<()> {
     let u4 = &Uuid::new_v4().to_simple_string()[..10];
-    try!(fs::soft_link(from, &to.join(u4)));
+    try!(symlink(from, &to.join(u4)));
     Ok(())
 }
 
