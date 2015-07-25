@@ -2,6 +2,7 @@ extern crate uuid;
 
 use std::fs;
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::path::Path;
 use std::path::PathBuf;
 use std::io::{Result, Error, Read, Write};
@@ -124,7 +125,7 @@ fn get_val(path: &Path, attr: &str) -> Result<String> {
 
 fn set_val(path: &Path, attr: &str, value: &str) -> Result<()> {
     let attr_path = path.join(attr);
-    let mut file = try!(File::open(&attr_path));
+    let mut file = try!(OpenOptions::new().write(true).open(&attr_path));
     try!(file.write_all(value.as_bytes()));
     Ok(())
 }
