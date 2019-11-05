@@ -1,12 +1,11 @@
-extern crate uuid;
-
 use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
+use std::io::ErrorKind::Other;
+use std::io::{Error, Read, Result, Write};
 use std::path::Path;
 use std::path::PathBuf;
-use std::io::{Result, Error, Read, Write};
-use std::io::ErrorKind::Other;
+use std::str::from_utf8;
 use std::string::String;
 
 use std::os::unix::fs::symlink;
@@ -27,31 +26,35 @@ impl MyPathExt for Path {
     fn is_file(&self) -> bool {
         match fs::metadata(self) {
             Ok(m) => m.is_file(),
-            Err(_) => false
+            Err(_) => false,
         }
     }
     fn is_dir(&self) -> bool {
         match fs::metadata(self) {
             Ok(m) => m.is_dir(),
-            Err(_) => false
+            Err(_) => false,
         }
     }
-
 }
 
 const TARGET_PATH: &'static str = "/sys/kernel/config/target/";
 const HBA_PATH: &'static str = "/sys/kernel/config/target/core";
 
 pub fn get_fabrics() -> Result<Vec<Fabric>> {
-    let dir = try!(fs::read_dir(TARGET_PATH));
+    let dir = fs::read_dir(TARGET_PATH)?;
 
     Ok(dir
-       .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
-       .filter(|path| path.is_dir())
-       .filter(|path| path.file_name().unwrap() != "core")
-       .map(|path| Fabric { path: path } )
-       .collect()
-       )
+        .filter_map(|path| {
+            if path.is_ok() {
+                Some(path.unwrap().path())
+            } else {
+                None
+            }
+        })
+        .filter(|path| path.is_dir())
+        .filter(|path| path.file_name().unwrap() != "core")
+        .map(|path| Fabric { path: path })
+        .collect())
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -70,7 +73,6 @@ pub struct Fabric {
 }
 
 impl Fabric {
-
     pub fn new(kind: FabricType) -> Result<Fabric> {
         let dirname = match kind {
             FabricType::ISCSI => "iscsi",
@@ -84,9 +86,9 @@ impl Fabric {
 
         let path = PathBuf::from(TARGET_PATH).join(dirname);
         if !path.exists() {
-            try!(fs::create_dir_all(&path))
+            fs::create_dir_all(&path)?
         }
-        Ok(Fabric { path: path } )
+        Ok(Fabric { path: path })
     }
 
     pub fn get_discovery_auth(&self, attr: &str) -> Result<String> {
@@ -99,36 +101,50 @@ impl Fabric {
 
     pub fn get_targets(&self) -> Result<Vec<Target>> {
         let mut targets = Vec::new();
-        let fab_paths = try!(fs::read_dir(&self.path));
+        let fab_paths = fs::read_dir(&self.path)?;
 
         for t_path in fab_paths
-            .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+            .filter_map(|path| {
+                if path.is_ok() {
+                    Some(path.unwrap().path())
+                } else {
+                    None
+                }
+            })
             .filter(|path| path.is_dir())
-            .filter(|path| path.file_name().unwrap() != "discovery_auth") {
-                let tpg_paths = try!(fs::read_dir(&t_path));
+            .filter(|path| path.file_name().unwrap() != "discovery_auth")
+        {
+            let tpg_paths = fs::read_dir(&t_path)?;
 
-                for tpg_path in tpg_paths
-                    .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
-                    .filter(|p| p.starts_with("tpgt_")) {
-                        targets.push(Target { path: tpg_path });
+            for tpg_path in tpg_paths
+                .filter_map(|path| {
+                    if path.is_ok() {
+                        Some(path.unwrap().path())
+                    } else {
+                        None
                     }
+                })
+                .filter(|p| p.starts_with("tpgt_"))
+            {
+                targets.push(Target { path: tpg_path });
             }
+        }
         Ok(targets)
     }
 }
 
 fn get_val(path: &Path, attr: &str) -> Result<String> {
     let attr_path = path.join(attr);
-    let mut file = try!(File::open(&attr_path));
+    let mut file = File::open(&attr_path)?;
     let mut str = String::new();
-    try!(file.read_to_string(&mut str));
-    Ok(str.trim_right().to_string())
+    file.read_to_string(&mut str)?;
+    Ok(str.trim_end().to_string())
 }
 
 fn set_val(path: &Path, attr: &str, value: &str) -> Result<()> {
     let attr_path = path.join(attr);
-    let mut file = try!(OpenOptions::new().write(true).open(&attr_path));
-    try!(file.write_all(value.as_bytes()));
+    let mut file = OpenOptions::new().write(true).open(&attr_path)?;
+    file.write_all(value.as_bytes())?;
     Ok(())
 }
 
@@ -151,12 +167,12 @@ fn set_dir_val(path: &Path, dir: &str, attr: &str, value: &str) -> Result<()> {
 }
 
 fn get_bool(path: &Path, attr: &str) -> Result<bool> {
-    let str = try!(get_val(path, attr));
+    let str = get_val(path, attr)?;
     match &str[..] {
         "0" => Ok(false),
         "1" => Ok(true),
-	_ => Err(Error::new(Other, "invalid value from configfs"))
-        }
+        _ => Err(Error::new(Other, "invalid value from configfs")),
+    }
 }
 
 fn set_bool(path: &Path, attr: &str, value: bool) -> Result<()> {
@@ -174,11 +190,10 @@ pub struct Target {
 // Targets with the same name but different tpg tags.
 //
 impl Target {
-
     pub fn new(fabric: &Fabric, name: &str, tpg: u32) -> Result<Target> {
         let path = fabric.path.join(name).join(&format!("tpgt_{}", tpg));
-        try!(fs::create_dir_all(&path));
-        Ok(Target { path: path } )
+        fs::create_dir_all(&path)?;
+        Ok(Target { path: path })
     }
 
     pub fn get_name(&self) -> String {
@@ -188,7 +203,9 @@ impl Target {
     }
 
     pub fn get_tpg(&self) -> u32 {
-        self.path.file_name().unwrap().to_str().unwrap()[5..].parse().unwrap()
+        self.path.file_name().unwrap().to_str().unwrap()[5..]
+            .parse()
+            .unwrap()
     }
 
     pub fn get_attribute(&self, attr: &str) -> Result<String> {
@@ -221,35 +238,50 @@ impl Target {
 
     pub fn get_acls(&self) -> Result<Vec<ACL>> {
         let path = self.path.join("acls");
-        let paths = try!(fs::read_dir(&path));
+        let paths = fs::read_dir(&path)?;
 
         Ok(paths
-           .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
-           .map(|x| ACL {path: x})
-           .collect()
-           )
+            .filter_map(|path| {
+                if path.is_ok() {
+                    Some(path.unwrap().path())
+                } else {
+                    None
+                }
+            })
+            .map(|x| ACL { path: x })
+            .collect())
     }
 
     pub fn get_luns(&self) -> Result<Vec<LUN>> {
         let path = self.path.join("lun");
-        let paths = try!(fs::read_dir(&path));
+        let paths = fs::read_dir(&path)?;
 
         Ok(paths
-           .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
-           .map(|x| LUN {path: x})
-           .collect()
-           )
+            .filter_map(|path| {
+                if path.is_ok() {
+                    Some(path.unwrap().path())
+                } else {
+                    None
+                }
+            })
+            .map(|x| LUN { path: x })
+            .collect())
     }
 
     pub fn get_portals(&self) -> Result<Vec<Portal>> {
         let path = self.path.join("np");
-        let paths = try!(fs::read_dir(&path));
+        let paths = fs::read_dir(&path)?;
 
         Ok(paths
-           .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
-           .map(|x| Portal {path: x})
-           .collect()
-           )
+            .filter_map(|path| {
+                if path.is_ok() {
+                    Some(path.unwrap().path())
+                } else {
+                    None
+                }
+            })
+            .map(|x| Portal { path: x })
+            .collect())
     }
 }
 
@@ -258,11 +290,10 @@ pub struct Portal {
 }
 
 impl Portal {
-
     pub fn new(target: &Target, ip: &str, port: u16) -> Result<Portal> {
         let path = target.path.join(&format!("{}:{}", ip, port));
-        try!(fs::create_dir_all(&path));
-        Ok(Portal { path: path } )
+        fs::create_dir_all(&path)?;
+        Ok(Portal { path: path })
     }
 
     pub fn get_ip(&self) -> String {
@@ -275,7 +306,7 @@ impl Portal {
     pub fn get_port(&self) -> u16 {
         let end_path = self.path.file_name().unwrap().to_str().unwrap();
         let colon_idx = end_path.rfind(':').unwrap();
-        end_path[colon_idx+1..].parse().unwrap()
+        end_path[colon_idx + 1..].parse().unwrap()
     }
 }
 
@@ -287,22 +318,25 @@ pub struct LUN {
 // Create a randomly-named link in "to" that points to "from"
 //
 fn lio_symlink(from: &Path, to: &Path) -> Result<()> {
-    let u4 = &Uuid::new_v4().to_simple_string()[..10];
-    try!(symlink(from, &to.join(u4)));
+    let mut buf = Uuid::encode_buffer();
+    let _u4 = Uuid::new_v4().to_simple().encode_lower(&mut buf);
+    let link = from_utf8(&buf[..10]).unwrap();
+
+    let to = to.join(link);
+    symlink(from, to)?;
     Ok(())
 }
 
 impl LUN {
-
-    pub fn new(target: &Target, so: &StorageObject, lun: u32) -> Result<LUN> {
+    pub fn new(target: &Target, so: &dyn StorageObject, lun: u32) -> Result<LUN> {
         // Make the LUN
         let path = target.path.join("lun").join(&format!("lun_{}", lun));
-        try!(fs::create_dir_all(&path));
+        fs::create_dir_all(&path)?;
 
         // Link it to storage object
-        try!(lio_symlink(so.get_path(), &path));
+        lio_symlink(so.get_path(), &path)?;
 
-        Ok(LUN { path: path } )
+        Ok(LUN { path: path })
     }
 
     pub fn get_lun(&self) -> u32 {
@@ -317,11 +351,10 @@ pub struct ACL {
 }
 
 impl ACL {
-
     pub fn new(target: &Target, acl: &str) -> Result<ACL> {
         let path = target.path.join(acl);
-        try!(fs::create_dir_all(&path));
-        Ok(ACL { path: path } )
+        fs::create_dir_all(&path)?;
+        Ok(ACL { path: path })
     }
 
     pub fn get_attribute(&self, attr: &str) -> Result<String> {
@@ -339,14 +372,19 @@ impl ACL {
     }
 
     pub fn get_mapped_luns(&self) -> Result<Vec<MappedLUN>> {
-        let paths = try!(fs::read_dir(&self.path));
+        let paths = fs::read_dir(&self.path)?;
 
         Ok(paths
-            .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+            .filter_map(|path| {
+                if path.is_ok() {
+                    Some(path.unwrap().path())
+                } else {
+                    None
+                }
+            })
             .filter(|p| p.starts_with("lun_"))
-            .map(|x| MappedLUN {path: x})
-            .collect()
-           )
+            .map(|x| MappedLUN { path: x })
+            .collect())
     }
 }
 
@@ -355,14 +393,13 @@ pub struct MappedLUN {
 }
 
 impl MappedLUN {
-
     pub fn new(acl: &ACL, tpg_lun: &LUN, lun: u32) -> Result<MappedLUN> {
         let path = acl.path.join(&format!("lun_{}", lun.to_string()));
 
-        try!(fs::create_dir_all(&path));
+        fs::create_dir_all(&path)?;
 
         // Link it to storage object
-        try!(lio_symlink(&tpg_lun.path, &path));
+        lio_symlink(&tpg_lun.path, &path)?;
 
         Ok(MappedLUN { path: path })
     }
@@ -420,20 +457,26 @@ pub struct BlockStorageObject {
 
 // TODO: err out if (type, name) already exists?
 fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Result<PathBuf> {
-    let paths = try!(fs::read_dir(HBA_PATH));
+    let paths = fs::read_dir(HBA_PATH)?;
 
     let max: Option<u32> = paths
-        .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+        .filter_map(|path| {
+            if path.is_ok() {
+                Some(path.unwrap().path())
+            } else {
+                None
+            }
+        })
         .filter(|p| p.starts_with(get_hba_prefix(kind)))
         .map(|p| {
             let idx = p.to_str().unwrap().rfind('_').unwrap();
-            p.to_str().unwrap()[idx+1..].parse().unwrap()
+            p.to_str().unwrap()[idx + 1..].parse().unwrap()
         })
         .max();
 
     let new_val = match max {
         Some(x) => x + 1,
-        None => 0
+        None => 0,
     };
 
     let hba_name = format!("{}_{}", get_hba_prefix(kind), new_val);
@@ -443,13 +486,13 @@ fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Result<PathBuf> {
 
 impl BlockStorageObject {
     pub fn new(name: &str, backing_dev: &str) -> Result<BlockStorageObject> {
-        let path = try!(get_free_hba_path(StorageObjectType::Block, name));
+        let path = get_free_hba_path(StorageObjectType::Block, name)?;
 
-        try!(fs::create_dir_all(&path));
-        try!(write_control(&path, "udev_path", backing_dev));
-        try!(set_val(&path, "enable", "1"));
+        fs::create_dir_all(&path)?;
+        write_control(&path, "udev_path", backing_dev)?;
+        set_val(&path, "enable", "1")?;
 
-        Ok(BlockStorageObject{ path: path })
+        Ok(BlockStorageObject { path: path })
     }
 }
 
@@ -458,7 +501,9 @@ impl StorageObject for BlockStorageObject {
         &self.path
     }
 
-    fn get_type(&self) -> StorageObjectType { StorageObjectType::Block }
+    fn get_type(&self) -> StorageObjectType {
+        StorageObjectType::Block
+    }
 }
 
 pub struct FileioStorageObject {
@@ -467,26 +512,26 @@ pub struct FileioStorageObject {
 
 impl FileioStorageObject {
     pub fn new(name: &str, backing_file: &str, write_back: bool) -> Result<FileioStorageObject> {
-        let path = try!(get_free_hba_path(StorageObjectType::Fileio, name));
+        let path = get_free_hba_path(StorageObjectType::Fileio, name)?;
 
-        try!(fs::create_dir_all(&path));
+        fs::create_dir_all(&path)?;
 
         // backing file must exist
         if path.is_file() {
-            try!(write_control(&path, "fd_dev_name", backing_file));
-            let size = try!(fs::metadata(&path)).len();
-            try!(write_control(&path, "fd_dev_size", &size.to_string()));
+            write_control(&path, "fd_dev_name", backing_file)?;
+            let size = fs::metadata(&path)?.len();
+            write_control(&path, "fd_dev_size", &size.to_string())?;
         }
 
         if write_back {
-            try!(set_dir_val(&path, "attrib", "emulate_write_cache", "1"));
-            try!(write_control(&path, "fd_buffered_io", "1"));
+            set_dir_val(&path, "attrib", "emulate_write_cache", "1")?;
+            write_control(&path, "fd_buffered_io", "1")?;
         }
 
-        try!(set_val(&path, "udev_path", backing_file));
-        try!(set_val(&path, "enable", "1"));
+        set_val(&path, "udev_path", backing_file)?;
+        set_val(&path, "enable", "1")?;
 
-        Ok(FileioStorageObject{ path: path })
+        Ok(FileioStorageObject { path: path })
     }
 }
 
@@ -495,7 +540,9 @@ impl StorageObject for FileioStorageObject {
         &self.path
     }
 
-    fn get_type(&self) -> StorageObjectType { StorageObjectType::Fileio }
+    fn get_type(&self) -> StorageObjectType {
+        StorageObjectType::Fileio
+    }
 }
 
 pub struct RamdiskStorageObject {
@@ -504,19 +551,19 @@ pub struct RamdiskStorageObject {
 
 impl RamdiskStorageObject {
     pub fn new(name: &str, size: u64) -> Result<RamdiskStorageObject> {
-        let path = try!(get_free_hba_path(StorageObjectType::Ramdisk, name));
+        let path = get_free_hba_path(StorageObjectType::Ramdisk, name)?;
 
-        try!(fs::create_dir_all(&path));
+        fs::create_dir_all(&path)?;
 
         // TODO: use env::page_size()
         let page_size = 4096;
 
         let pages = size / page_size as u64;
 
-        try!(set_val(&path, "rd_pages", &pages.to_string()));
-        try!(set_val(&path, "enable", "1"));
+        set_val(&path, "rd_pages", &pages.to_string())?;
+        set_val(&path, "enable", "1")?;
 
-        Ok(RamdiskStorageObject{ path: path })
+        Ok(RamdiskStorageObject { path: path })
     }
 }
 
@@ -525,7 +572,9 @@ impl StorageObject for RamdiskStorageObject {
         &self.path
     }
 
-    fn get_type(&self) -> StorageObjectType { StorageObjectType::Ramdisk }
+    fn get_type(&self) -> StorageObjectType {
+        StorageObjectType::Ramdisk
+    }
 }
 
 pub struct ScsiPassStorageObject {
@@ -538,33 +587,45 @@ fn get_hctl_for_dev(dev: &str) -> Result<(u8, u8, u8, u32)> {
     path.push("device");
     path.push("scsi_device");
 
-    let mut paths = try!(fs::read_dir(&path));
+    let mut paths = fs::read_dir(&path)?;
     let first_path = paths.next();
-    let hctl_parts: Vec<u32> = first_path.unwrap().unwrap().path().file_name().unwrap().to_str().unwrap()
+    let hctl_parts: Vec<u32> = first_path
+        .unwrap()
+        .unwrap()
+        .path()
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
         .split(':')
         .map(|x| x.parse().unwrap())
         .collect();
 
-    Ok((hctl_parts[0] as u8, hctl_parts[1] as u8, hctl_parts[2] as u8, hctl_parts[3]))
+    Ok((
+        hctl_parts[0] as u8,
+        hctl_parts[1] as u8,
+        hctl_parts[2] as u8,
+        hctl_parts[3],
+    ))
 }
 
 impl ScsiPassStorageObject {
     pub fn new(name: &str, backing_dev: &str) -> Result<ScsiPassStorageObject> {
-        let path = try!(get_free_hba_path(StorageObjectType::ScsiPass, name));
+        let path = get_free_hba_path(StorageObjectType::ScsiPass, name)?;
 
-        let (h, c, t, l) = try!(get_hctl_for_dev(backing_dev));
+        let (h, c, t, l) = get_hctl_for_dev(backing_dev)?;
 
-        try!(fs::create_dir_all(&path));
+        fs::create_dir_all(&path)?;
 
-        try!(write_control(&path, "scsi_host_id", &h.to_string()));
-        try!(write_control(&path, "scsi_channel_id", &c.to_string()));
-        try!(write_control(&path, "scsi_target_id", &t.to_string()));
-        try!(write_control(&path, "scsi_lun_id", &l.to_string()));
+        write_control(&path, "scsi_host_id", &h.to_string())?;
+        write_control(&path, "scsi_channel_id", &c.to_string())?;
+        write_control(&path, "scsi_target_id", &t.to_string())?;
+        write_control(&path, "scsi_lun_id", &l.to_string())?;
 
-        try!(set_val(&path, "udev_path", &format!("/dev/{}", &backing_dev)));
-        try!(set_val(&path, "enable", "1"));
+        set_val(&path, "udev_path", &format!("/dev/{}", &backing_dev))?;
+        set_val(&path, "enable", "1")?;
 
-        Ok(ScsiPassStorageObject{ path: path })
+        Ok(ScsiPassStorageObject { path: path })
     }
 }
 
@@ -573,7 +634,9 @@ impl StorageObject for ScsiPassStorageObject {
         &self.path
     }
 
-    fn get_type(&self) -> StorageObjectType { StorageObjectType::ScsiPass }
+    fn get_type(&self) -> StorageObjectType {
+        StorageObjectType::ScsiPass
+    }
 }
 
 pub struct UserPassStorageObject {
@@ -587,17 +650,22 @@ pub enum PassLevel {
 }
 
 impl UserPassStorageObject {
-    pub fn new(name: &str, size: u64, pass_level: PassLevel, config: &str) -> Result<UserPassStorageObject> {
-        let path = try!(get_free_hba_path(StorageObjectType::UserPass, name));
-        try!(fs::create_dir_all(&path));
+    pub fn new(
+        name: &str,
+        size: u64,
+        pass_level: PassLevel,
+        config: &str,
+    ) -> Result<UserPassStorageObject> {
+        let path = get_free_hba_path(StorageObjectType::UserPass, name)?;
+        fs::create_dir_all(&path)?;
 
-        try!(write_control(&path, "dev_config", config));
-        try!(write_control(&path, "pass_level", &(pass_level as u8).to_string()));
-        try!(write_control(&path, "dev_size", &size.to_string()));
+        write_control(&path, "dev_config", config)?;
+        write_control(&path, "pass_level", &(pass_level as u8).to_string())?;
+        write_control(&path, "dev_size", &size.to_string())?;
 
-        try!(set_val(&path, "enable", "1"));
+        set_val(&path, "enable", "1")?;
 
-        Ok(UserPassStorageObject{ path: path })
+        Ok(UserPassStorageObject { path: path })
     }
 }
 
@@ -606,7 +674,9 @@ impl StorageObject for UserPassStorageObject {
         &self.path
     }
 
-    fn get_type(&self) -> StorageObjectType { StorageObjectType::UserPass }
+    fn get_type(&self) -> StorageObjectType {
+        StorageObjectType::UserPass
+    }
 }
 
 fn get_hba_prefix(kind: StorageObjectType) -> &'static str {
@@ -628,44 +698,56 @@ fn get_hba_type(path: &PathBuf) -> Option<StorageObjectType> {
         "rd_mcp" => Some(StorageObjectType::Ramdisk),
         "pscsi" => Some(StorageObjectType::ScsiPass),
         "user" => Some(StorageObjectType::UserPass),
-        _ => None
+        _ => None,
     }
 }
 
-pub fn get_storage_objects() -> Result<Vec<Box<StorageObject>>> {
-    let mut sos: Vec<Box<StorageObject>> = Vec::new();
+pub fn get_storage_objects() -> Result<Vec<Box<dyn StorageObject>>> {
+    let mut sos: Vec<Box<dyn StorageObject>> = Vec::new();
 
-    for hba_path in try!(fs::read_dir(HBA_PATH))
-        .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
+    for hba_path in fs::read_dir(HBA_PATH)?
+        .filter_map(|path| {
+            if path.is_ok() {
+                Some(path.unwrap().path())
+            } else {
+                None
+            }
+        })
         .filter(|p| p.is_dir())
-        .filter(|p| p.file_name().unwrap() != "alua") {
-            for so_path in try!(fs::read_dir(&hba_path))
-                .filter_map(|path| if path.is_ok() {Some(path.unwrap().path())} else {None})
-                .filter(|path| path.is_dir()) {
-                    match get_hba_type(&so_path) {
-                        Some(StorageObjectType::Block) => {
-                            sos.push(Box::new(BlockStorageObject { path: so_path }))
-                        },
-                        Some(StorageObjectType::Fileio) => {
-                            sos.push(Box::new(FileioStorageObject { path: so_path }))
-                        },
-                        Some(StorageObjectType::Ramdisk) => {
-                            sos.push(Box::new(RamdiskStorageObject { path: so_path }))
-                        },
-                        Some(StorageObjectType::ScsiPass) => {
-                            sos.push(Box::new(ScsiPassStorageObject { path: so_path }))
-                        },
-                        Some(StorageObjectType::UserPass) => {
-                            sos.push(Box::new(UserPassStorageObject { path: so_path }))
-                        },
-                        None => { },
-                    }
+        .filter(|p| p.file_name().unwrap() != "alua")
+    {
+        for so_path in fs::read_dir(&hba_path)?
+            .filter_map(|path| {
+                if path.is_ok() {
+                    Some(path.unwrap().path())
+                } else {
+                    None
                 }
+            })
+            .filter(|path| path.is_dir())
+        {
+            match get_hba_type(&so_path) {
+                Some(StorageObjectType::Block) => {
+                    sos.push(Box::new(BlockStorageObject { path: so_path }))
+                }
+                Some(StorageObjectType::Fileio) => {
+                    sos.push(Box::new(FileioStorageObject { path: so_path }))
+                }
+                Some(StorageObjectType::Ramdisk) => {
+                    sos.push(Box::new(RamdiskStorageObject { path: so_path }))
+                }
+                Some(StorageObjectType::ScsiPass) => {
+                    sos.push(Box::new(ScsiPassStorageObject { path: so_path }))
+                }
+                Some(StorageObjectType::UserPass) => {
+                    sos.push(Box::new(UserPassStorageObject { path: so_path }))
+                }
+                None => {}
+            }
         }
+    }
     Ok(sos)
 }
 
-
 #[test]
-fn it_works() {
-}
+fn it_works() {}
