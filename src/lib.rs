@@ -12,48 +12,17 @@ use std::os::unix::fs::symlink;
 
 use uuid::Uuid;
 
-// TODO: Replace once PathExt is stable
-trait MyPathExt {
-    fn exists(&self) -> bool;
-    fn is_file(&self) -> bool;
-    fn is_dir(&self) -> bool;
-}
-
-impl MyPathExt for Path {
-    fn exists(&self) -> bool {
-        self.is_dir() || self.is_file()
-    }
-    fn is_file(&self) -> bool {
-        match fs::metadata(self) {
-            Ok(m) => m.is_file(),
-            Err(_) => false,
-        }
-    }
-    fn is_dir(&self) -> bool {
-        match fs::metadata(self) {
-            Ok(m) => m.is_dir(),
-            Err(_) => false,
-        }
-    }
-}
-
-const TARGET_PATH: &'static str = "/sys/kernel/config/target/";
-const HBA_PATH: &'static str = "/sys/kernel/config/target/core";
+const TARGET_PATH: &str = "/sys/kernel/config/target/";
+const HBA_PATH: &str = "/sys/kernel/config/target/core";
 
 pub fn get_fabrics() -> Result<Vec<Fabric>> {
     let dir = fs::read_dir(TARGET_PATH)?;
 
     Ok(dir
-        .filter_map(|path| {
-            if path.is_ok() {
-                Some(path.unwrap().path())
-            } else {
-                None
-            }
-        })
+        .filter_map(|path| path.ok().map(|p| p.path()))
         .filter(|path| path.is_dir())
-        .filter(|path| path.file_name().unwrap() != "core")
-        .map(|path| Fabric { path: path })
+        .filter(|path| path.file_name().map_or(false, |f| f != "core"))
+        .map(|path| Fabric { path })
         .collect())
 }
 
@@ -88,7 +57,7 @@ impl Fabric {
         if !path.exists() {
             fs::create_dir_all(&path)?
         }
-        Ok(Fabric { path: path })
+        Ok(Fabric { path })
     }
 
     pub fn get_discovery_auth(&self, attr: &str) -> Result<String> {
@@ -104,26 +73,14 @@ impl Fabric {
         let fab_paths = fs::read_dir(&self.path)?;
 
         for t_path in fab_paths
-            .filter_map(|path| {
-                if path.is_ok() {
-                    Some(path.unwrap().path())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|path| path.ok().map(|p| p.path()))
             .filter(|path| path.is_dir())
-            .filter(|path| path.file_name().unwrap() != "discovery_auth")
+            .filter(|path| path.file_name().map_or(false, |f| f != "discovery_auth"))
         {
             let tpg_paths = fs::read_dir(&t_path)?;
 
             for tpg_path in tpg_paths
-                .filter_map(|path| {
-                    if path.is_ok() {
-                        Some(path.unwrap().path())
-                    } else {
-                        None
-                    }
-                })
+                .filter_map(|path| path.ok().map(|p| p.path()))
                 .filter(|p| p.starts_with("tpgt_"))
             {
                 targets.push(Target { path: tpg_path });
@@ -193,7 +150,7 @@ impl Target {
     pub fn new(fabric: &Fabric, name: &str, tpg: u32) -> Result<Target> {
         let path = fabric.path.join(name).join(&format!("tpgt_{}", tpg));
         fs::create_dir_all(&path)?;
-        Ok(Target { path: path })
+        Ok(Target { path })
     }
 
     pub fn get_name(&self) -> String {
@@ -241,13 +198,7 @@ impl Target {
         let paths = fs::read_dir(&path)?;
 
         Ok(paths
-            .filter_map(|path| {
-                if path.is_ok() {
-                    Some(path.unwrap().path())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|path| path.ok().map(|p| p.path()))
             .map(|x| ACL { path: x })
             .collect())
     }
@@ -257,13 +208,7 @@ impl Target {
         let paths = fs::read_dir(&path)?;
 
         Ok(paths
-            .filter_map(|path| {
-                if path.is_ok() {
-                    Some(path.unwrap().path())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|path| path.ok().map(|p| p.path()))
             .map(|x| LUN { path: x })
             .collect())
     }
@@ -273,13 +218,7 @@ impl Target {
         let paths = fs::read_dir(&path)?;
 
         Ok(paths
-            .filter_map(|path| {
-                if path.is_ok() {
-                    Some(path.unwrap().path())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|path| path.ok().map(|p| p.path()))
             .map(|x| Portal { path: x })
             .collect())
     }
@@ -293,7 +232,7 @@ impl Portal {
     pub fn new(target: &Target, ip: &str, port: u16) -> Result<Portal> {
         let path = target.path.join(&format!("{}:{}", ip, port));
         fs::create_dir_all(&path)?;
-        Ok(Portal { path: path })
+        Ok(Portal { path })
     }
 
     pub fn get_ip(&self) -> String {
@@ -336,7 +275,7 @@ impl LUN {
         // Link it to storage object
         lio_symlink(so.get_path(), &path)?;
 
-        Ok(LUN { path: path })
+        Ok(LUN { path })
     }
 
     pub fn get_lun(&self) -> u32 {
@@ -354,7 +293,7 @@ impl ACL {
     pub fn new(target: &Target, acl: &str) -> Result<ACL> {
         let path = target.path.join(acl);
         fs::create_dir_all(&path)?;
-        Ok(ACL { path: path })
+        Ok(ACL { path })
     }
 
     pub fn get_attribute(&self, attr: &str) -> Result<String> {
@@ -375,13 +314,7 @@ impl ACL {
         let paths = fs::read_dir(&self.path)?;
 
         Ok(paths
-            .filter_map(|path| {
-                if path.is_ok() {
-                    Some(path.unwrap().path())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|path| path.ok().map(|p| p.path()))
             .filter(|p| p.starts_with("lun_"))
             .map(|x| MappedLUN { path: x })
             .collect())
@@ -401,7 +334,7 @@ impl MappedLUN {
         // Link it to storage object
         lio_symlink(&tpg_lun.path, &path)?;
 
-        Ok(MappedLUN { path: path })
+        Ok(MappedLUN { path })
     }
 
     pub fn get_write_protect(&self) -> Result<bool> {
@@ -460,13 +393,7 @@ fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Result<PathBuf> {
     let paths = fs::read_dir(HBA_PATH)?;
 
     let max: Option<u32> = paths
-        .filter_map(|path| {
-            if path.is_ok() {
-                Some(path.unwrap().path())
-            } else {
-                None
-            }
-        })
+        .filter_map(|path| path.ok().map(|p| p.path()))
         .filter(|p| p.starts_with(get_hba_prefix(kind)))
         .map(|p| {
             let idx = p.to_str().unwrap().rfind('_').unwrap();
@@ -492,7 +419,7 @@ impl BlockStorageObject {
         write_control(&path, "udev_path", backing_dev)?;
         set_val(&path, "enable", "1")?;
 
-        Ok(BlockStorageObject { path: path })
+        Ok(BlockStorageObject { path })
     }
 }
 
@@ -531,7 +458,7 @@ impl FileioStorageObject {
         set_val(&path, "udev_path", backing_file)?;
         set_val(&path, "enable", "1")?;
 
-        Ok(FileioStorageObject { path: path })
+        Ok(FileioStorageObject { path })
     }
 }
 
@@ -563,7 +490,7 @@ impl RamdiskStorageObject {
         set_val(&path, "rd_pages", &pages.to_string())?;
         set_val(&path, "enable", "1")?;
 
-        Ok(RamdiskStorageObject { path: path })
+        Ok(RamdiskStorageObject { path })
     }
 }
 
@@ -625,7 +552,7 @@ impl ScsiPassStorageObject {
         set_val(&path, "udev_path", &format!("/dev/{}", &backing_dev))?;
         set_val(&path, "enable", "1")?;
 
-        Ok(ScsiPassStorageObject { path: path })
+        Ok(ScsiPassStorageObject { path })
     }
 }
 
@@ -665,7 +592,7 @@ impl UserPassStorageObject {
 
         set_val(&path, "enable", "1")?;
 
-        Ok(UserPassStorageObject { path: path })
+        Ok(UserPassStorageObject { path })
     }
 }
 
@@ -706,24 +633,12 @@ pub fn get_storage_objects() -> Result<Vec<Box<dyn StorageObject>>> {
     let mut sos: Vec<Box<dyn StorageObject>> = Vec::new();
 
     for hba_path in fs::read_dir(HBA_PATH)?
-        .filter_map(|path| {
-            if path.is_ok() {
-                Some(path.unwrap().path())
-            } else {
-                None
-            }
-        })
+        .filter_map(|path| path.ok().map(|p| p.path()))
         .filter(|p| p.is_dir())
-        .filter(|p| p.file_name().unwrap() != "alua")
+        .filter(|path| path.file_name().map_or(false, |f| f != "alua"))
     {
         for so_path in fs::read_dir(&hba_path)?
-            .filter_map(|path| {
-                if path.is_ok() {
-                    Some(path.unwrap().path())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|path| path.ok().map(|p| p.path()))
             .filter(|path| path.is_dir())
         {
             match get_hba_type(&so_path) {
