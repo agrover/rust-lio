@@ -15,7 +15,7 @@ use uuid::Uuid;
 const TARGET_PATH: &str = "/sys/kernel/config/target/";
 const HBA_PATH: &str = "/sys/kernel/config/target/core";
 
-pub fn get_fabrics() -> Result<Vec<Fabric>> {
+pub fn fabrics() -> Result<Vec<Fabric>> {
     let dir = fs::read_dir(TARGET_PATH)?;
 
     Ok(dir
@@ -60,7 +60,7 @@ impl Fabric {
         Ok(Fabric { path })
     }
 
-    pub fn get_discovery_auth(&self, attr: &str) -> Result<String> {
+    pub fn discovery_auth(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.path, "discovery_auth", attr)
     }
 
@@ -68,7 +68,7 @@ impl Fabric {
         set_dir_val(&self.path, "discovery_auth", attr, value)
     }
 
-    pub fn get_targets(&self) -> Result<Vec<Target>> {
+    pub fn targets(&self) -> Result<Vec<Target>> {
         let mut targets = Vec::new();
         let fab_paths = fs::read_dir(&self.path)?;
 
@@ -153,47 +153,47 @@ impl Target {
         Ok(Target { path })
     }
 
-    pub fn get_name(&self) -> String {
+    pub fn name(&self) -> String {
         let mut my_path = self.path.clone();
         my_path.pop();
         my_path.file_name().unwrap().to_string_lossy().into_owned()
     }
 
-    pub fn get_tpg(&self) -> u32 {
+    pub fn tpg(&self) -> u32 {
         self.path.file_name().unwrap().to_str().unwrap()[5..]
             .parse()
             .unwrap()
     }
 
-    pub fn get_attribute(&self, attr: &str) -> Result<String> {
+    pub fn attribute(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.path, "attrib", attr)
     }
     pub fn set_attribute(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.path, "attrib", attr, value)
     }
 
-    pub fn get_param(&self, attr: &str) -> Result<String> {
+    pub fn param(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.path, "param", attr)
     }
     pub fn set_param(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.path, "param", attr, value)
     }
 
-    pub fn get_auth(&self, attr: &str) -> Result<String> {
+    pub fn auth(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.path, "auth", attr)
     }
     pub fn set_auth(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.path, "auth", attr, value)
     }
 
-    pub fn get_enable(&self) -> Result<bool> {
+    pub fn enable(&self) -> Result<bool> {
         get_bool(&self.path, "enable")
     }
     pub fn set_enable(&self, value: bool) -> Result<()> {
         set_bool(&self.path, "enable", value)
     }
 
-    pub fn get_acls(&self) -> Result<Vec<ACL>> {
+    pub fn acls(&self) -> Result<Vec<ACL>> {
         let path = self.path.join("acls");
         let paths = fs::read_dir(&path)?;
 
@@ -203,7 +203,7 @@ impl Target {
             .collect())
     }
 
-    pub fn get_luns(&self) -> Result<Vec<LUN>> {
+    pub fn luns(&self) -> Result<Vec<LUN>> {
         let path = self.path.join("lun");
         let paths = fs::read_dir(&path)?;
 
@@ -213,7 +213,7 @@ impl Target {
             .collect())
     }
 
-    pub fn get_portals(&self) -> Result<Vec<Portal>> {
+    pub fn portals(&self) -> Result<Vec<Portal>> {
         let path = self.path.join("np");
         let paths = fs::read_dir(&path)?;
 
@@ -235,14 +235,14 @@ impl Portal {
         Ok(Portal { path })
     }
 
-    pub fn get_ip(&self) -> String {
+    pub fn ip(&self) -> String {
         let end_path = self.path.file_name().unwrap().to_str().unwrap();
         let colon_idx = end_path.rfind(':').unwrap();
         end_path[..colon_idx].to_string()
     }
 
     // TODO: broken for ipv6
-    pub fn get_port(&self) -> u16 {
+    pub fn port(&self) -> u16 {
         let end_path = self.path.file_name().unwrap().to_str().unwrap();
         let colon_idx = end_path.rfind(':').unwrap();
         end_path[colon_idx + 1..].parse().unwrap()
@@ -273,12 +273,12 @@ impl LUN {
         fs::create_dir_all(&path)?;
 
         // Link it to storage object
-        lio_symlink(so.get_path(), &path)?;
+        lio_symlink(so.path(), &path)?;
 
         Ok(LUN { path })
     }
 
-    pub fn get_lun(&self) -> u32 {
+    pub fn lun(&self) -> u32 {
         let end_path = self.path.file_name().unwrap().to_str().unwrap();
         // chop off "lun_"
         end_path[4..].parse().unwrap()
@@ -296,21 +296,21 @@ impl ACL {
         Ok(ACL { path })
     }
 
-    pub fn get_attribute(&self, attr: &str) -> Result<String> {
+    pub fn attribute(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.path, "attrib", attr)
     }
     pub fn set_attribute(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.path, "attrib", attr, value)
     }
 
-    pub fn get_param(&self, attr: &str) -> Result<String> {
+    pub fn param(&self, attr: &str) -> Result<String> {
         get_dir_val(&self.path, "param", attr)
     }
     pub fn set_param(&self, attr: &str, value: &str) -> Result<()> {
         set_dir_val(&self.path, "param", attr, value)
     }
 
-    pub fn get_mapped_luns(&self) -> Result<Vec<MappedLUN>> {
+    pub fn mapped_luns(&self) -> Result<Vec<MappedLUN>> {
         let paths = fs::read_dir(&self.path)?;
 
         Ok(paths
@@ -337,7 +337,7 @@ impl MappedLUN {
         Ok(MappedLUN { path })
     }
 
-    pub fn get_write_protect(&self) -> Result<bool> {
+    pub fn write_protect(&self) -> Result<bool> {
         get_bool(&self.path, "write_protect")
     }
 
@@ -356,31 +356,31 @@ pub enum StorageObjectType {
 }
 
 pub trait StorageObject {
-    fn get_path(&self) -> &Path;
-    fn get_type(&self) -> StorageObjectType;
+    fn path(&self) -> &Path;
+    fn so_type(&self) -> StorageObjectType;
 
-    fn get_attribute(&self, attr: &str) -> Result<String> {
-        get_dir_val(&self.get_path(), "attrib", attr)
+    fn attribute(&self, attr: &str) -> Result<String> {
+        get_dir_val(&self.path(), "attrib", attr)
     }
 
     fn set_attribute(&self, attr: &str, value: &str) -> Result<()> {
-        set_dir_val(self.get_path(), "attrib", attr, value)
+        set_dir_val(self.path(), "attrib", attr, value)
     }
 
-    fn get_pr(&self, attr: &str) -> Result<String> {
-        get_dir_val(&self.get_path(), "pr", attr)
+    fn pr(&self, attr: &str) -> Result<String> {
+        get_dir_val(&self.path(), "pr", attr)
     }
 
     fn set_pr(&self, attr: &str, value: &str) -> Result<()> {
-        set_dir_val(&self.get_path(), "pr", attr, value)
+        set_dir_val(&self.path(), "pr", attr, value)
     }
 
-    fn get_wwn(&self, attr: &str) -> Result<String> {
-        get_dir_val(&self.get_path(), "wwn", attr)
+    fn wwn(&self, attr: &str) -> Result<String> {
+        get_dir_val(&self.path(), "wwn", attr)
     }
 
     fn set_wwn(&self, attr: &str, value: &str) -> Result<()> {
-        set_dir_val(&self.get_path(), "wwn", attr, value)
+        set_dir_val(&self.path(), "wwn", attr, value)
     }
 }
 
@@ -394,7 +394,7 @@ fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Result<PathBuf> {
 
     let max: Option<u32> = paths
         .filter_map(|path| path.ok().map(|p| p.path()))
-        .filter(|p| p.starts_with(get_hba_prefix(kind)))
+        .filter(|p| p.starts_with(hba_prefix(kind)))
         .map(|p| {
             let idx = p.to_str().unwrap().rfind('_').unwrap();
             p.to_str().unwrap()[idx + 1..].parse().unwrap()
@@ -406,7 +406,7 @@ fn get_free_hba_path(kind: StorageObjectType, name: &str) -> Result<PathBuf> {
         None => 0,
     };
 
-    let hba_name = format!("{}_{}", get_hba_prefix(kind), new_val);
+    let hba_name = format!("{}_{}", hba_prefix(kind), new_val);
 
     Ok(PathBuf::from(HBA_PATH).join(&hba_name).join(name))
 }
@@ -424,11 +424,11 @@ impl BlockStorageObject {
 }
 
 impl StorageObject for BlockStorageObject {
-    fn get_path(&self) -> &Path {
+    fn path(&self) -> &Path {
         &self.path
     }
 
-    fn get_type(&self) -> StorageObjectType {
+    fn so_type(&self) -> StorageObjectType {
         StorageObjectType::Block
     }
 }
@@ -463,11 +463,11 @@ impl FileioStorageObject {
 }
 
 impl StorageObject for FileioStorageObject {
-    fn get_path(&self) -> &Path {
+    fn path(&self) -> &Path {
         &self.path
     }
 
-    fn get_type(&self) -> StorageObjectType {
+    fn so_type(&self) -> StorageObjectType {
         StorageObjectType::Fileio
     }
 }
@@ -495,11 +495,11 @@ impl RamdiskStorageObject {
 }
 
 impl StorageObject for RamdiskStorageObject {
-    fn get_path(&self) -> &Path {
+    fn path(&self) -> &Path {
         &self.path
     }
 
-    fn get_type(&self) -> StorageObjectType {
+    fn so_type(&self) -> StorageObjectType {
         StorageObjectType::Ramdisk
     }
 }
@@ -557,11 +557,11 @@ impl ScsiPassStorageObject {
 }
 
 impl StorageObject for ScsiPassStorageObject {
-    fn get_path(&self) -> &Path {
+    fn path(&self) -> &Path {
         &self.path
     }
 
-    fn get_type(&self) -> StorageObjectType {
+    fn so_type(&self) -> StorageObjectType {
         StorageObjectType::ScsiPass
     }
 }
@@ -597,16 +597,16 @@ impl UserPassStorageObject {
 }
 
 impl StorageObject for UserPassStorageObject {
-    fn get_path(&self) -> &Path {
+    fn path(&self) -> &Path {
         &self.path
     }
 
-    fn get_type(&self) -> StorageObjectType {
+    fn so_type(&self) -> StorageObjectType {
         StorageObjectType::UserPass
     }
 }
 
-fn get_hba_prefix(kind: StorageObjectType) -> &'static str {
+fn hba_prefix(kind: StorageObjectType) -> &'static str {
     match kind {
         StorageObjectType::Block => "iblock",
         StorageObjectType::Fileio => "fileio",
@@ -616,7 +616,7 @@ fn get_hba_prefix(kind: StorageObjectType) -> &'static str {
     }
 }
 
-fn get_hba_type(path: &PathBuf) -> Option<StorageObjectType> {
+fn hba_type(path: &PathBuf) -> Option<StorageObjectType> {
     let end_path = path.file_name().unwrap().to_str().unwrap();
     let idx = end_path.rfind('_').unwrap();
     match &end_path[..idx] {
@@ -629,7 +629,7 @@ fn get_hba_type(path: &PathBuf) -> Option<StorageObjectType> {
     }
 }
 
-pub fn get_storage_objects() -> Result<Vec<Box<dyn StorageObject>>> {
+pub fn storage_objects() -> Result<Vec<Box<dyn StorageObject>>> {
     let mut sos: Vec<Box<dyn StorageObject>> = Vec::new();
 
     for hba_path in fs::read_dir(HBA_PATH)?
@@ -641,7 +641,7 @@ pub fn get_storage_objects() -> Result<Vec<Box<dyn StorageObject>>> {
             .filter_map(|path| path.ok().map(|p| p.path()))
             .filter(|path| path.is_dir())
         {
-            match get_hba_type(&so_path) {
+            match hba_type(&so_path) {
                 Some(StorageObjectType::Block) => {
                     sos.push(Box::new(BlockStorageObject { path: so_path }))
                 }
